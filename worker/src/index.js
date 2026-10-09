@@ -109,6 +109,7 @@ export default {
 
 const SESSION_TTL = 60 * 60 * 24 * 30;
 const ADMIN_KEY_TTL = 60 * 60 * 12;
+const OWNER_ID = "1791564031465";
 const DEFAULT_ITERATIONS = 10000;
 const USERNAME_RE = /^[A-Za-z0-9_]{3,16}$/;
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
@@ -145,6 +146,7 @@ function publicUser(u) {
     email: u.email,
     uuid: u.uuid,
     is_admin: !!u.is_admin,
+    is_owner: String(u.id) === OWNER_ID,
     created_at: u.created_at,
     has_avatar: !!u.has_avatar,
     has_skin: !!u.has_skin,
@@ -430,6 +432,7 @@ async function requireAdmin(request, env, cors) {
   const user = await userFromRequest(request, env);
   if (!user) return { error: json({ detail: "Требуется вход" }, 401, cors) };
   if (!user.is_admin) return { error: json({ detail: "Нет доступа" }, 403, cors) };
+  if (String(user.id) === OWNER_ID) return { user };
 
   const key = (request.headers.get("X-Admin-Key") || "").trim();
   if (!key) return { error: json({ detail: "Введите пароль админ-панели" }, 401, cors) };

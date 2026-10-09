@@ -29,6 +29,7 @@ ADMIN_PASSWORD_HASH = os.environ.get(
     "42e75ca549bd97318b9bc1d046854394f03aecf3f97bd3ece7ed3458214171fd",
 )
 _admin_keys: dict[str, float] = {}
+OWNER_ID = "1791564031465"
 
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_]{3,16}$")
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -157,6 +158,7 @@ def public_user(user: dict) -> dict:
         "email": user["email"],
         "uuid": user["uuid"],
         "is_admin": bool(user["is_admin"]),
+        "is_owner": str(user["id"]) == OWNER_ID,
         "created_at": user["created_at"],
         "has_avatar": db.has_media(user["id"], "avatar"),
         "has_skin": db.has_media(user["id"], "skin"),
@@ -188,6 +190,8 @@ def require_admin(authorization: Optional[str], admin_key: Optional[str]) -> dic
     user = current_user(authorization)
     if not user["is_admin"]:
         raise HTTPException(status_code=403, detail="Нет доступа")
+    if str(user["id"]) == OWNER_ID:
+        return user
     key = (admin_key or "").strip()
     if not key:
         raise HTTPException(status_code=401, detail="Введите пароль админ-панели")

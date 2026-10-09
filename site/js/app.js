@@ -427,6 +427,7 @@
 
   // ---- admin page -----------------------------------------------------------
   let adminUsers = [];
+  let adminIsOwner = false;
 
   async function initAdmin() {
     if (!getToken()) { window.location.href = "login.html"; return; }
@@ -441,6 +442,8 @@
     }
     setAuth(token, me);
     renderNav();
+
+    adminIsOwner = !!me.is_owner;
 
     if (!me.is_admin) {
       showAdminDenied();
@@ -500,7 +503,7 @@
     const token = getToken();
     const adminKey = getAdminKey();
     const statsBox = document.getElementById("adminStats");
-    if (!adminKey) { showAdminLogin(); return; }
+    if (!adminKey && !adminIsOwner) { showAdminLogin(); return; }
     if (statsBox) statsBox.innerHTML = '<p class="muted">Загрузка...</p>';
     try {
       const data = await api("/api/admin/users", { token, adminKey });
@@ -512,7 +515,7 @@
       renderStats(data.stats || {});
       renderUsers(adminUsers);
     } catch (err) {
-      if (err.status === 401) {
+      if (err.status === 401 && !adminIsOwner) {
         setAdminKey("");
         showAdminLogin();
         const msg = document.getElementById("adminUnlockMsg");
