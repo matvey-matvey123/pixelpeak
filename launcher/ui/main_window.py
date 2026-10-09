@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QUrl, Signal
@@ -65,6 +66,7 @@ class MainWindow(QWidget):
         self.pages = QStackedWidget()
         self.pages.addWidget(self._build_play_page())
         self.pages.addWidget(self._build_versions_page())
+        self.pages.addWidget(self._build_mods_page())
         self.pages.addWidget(self._build_settings_page())
         self.pages.addWidget(self._build_console_page())
         root.addWidget(self.pages, 1)
@@ -102,7 +104,7 @@ class MainWindow(QWidget):
 
         self.nav_group = QButtonGroup(self)
         self.nav_group.setExclusive(True)
-        for idx, text in enumerate(["Играть", "Версии", "Настройки", "Консоль"]):
+        for idx, text in enumerate(["Играть", "Версии", "Моды", "Настройки", "Консоль"]):
             btn = QPushButton(text)
             btn.setObjectName("Nav")
             btn.setCheckable(True)
@@ -239,6 +241,63 @@ class MainWindow(QWidget):
         self.ver_status.setObjectName("Muted")
         lay.addWidget(self.ver_status)
 
+        return page
+
+    # --- страница «Моды» ----------------------------------------------------
+    def _build_mods_page(self) -> QWidget:
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(34, 28, 34, 28)
+        lay.setSpacing(14)
+
+        title = QLabel("Моды")
+        title.setObjectName("PageTitle")
+        lay.addWidget(title)
+
+        self.mods_path_label = QLabel()
+        self.mods_path_label.setObjectName("Muted")
+        self.mods_path_label.setWordWrap(True)
+        lay.addWidget(self.mods_path_label)
+
+        note = QLabel("Моды работают с Fabric, Forge, NeoForge и Quilt. Для Vanilla моды не загружаются.")
+        note.setObjectName("Muted")
+        note.setWordWrap(True)
+        lay.addWidget(note)
+
+        row = QHBoxLayout()
+        add_btn = QPushButton("Добавить моды")
+        add_btn.setObjectName("Primary")
+        add_btn.setCursor(Qt.PointingHandCursor)
+        add_btn.clicked.connect(self._add_mods)
+        row.addWidget(add_btn)
+
+        toggle_btn = QPushButton("Вкл/Выкл")
+        toggle_btn.clicked.connect(self._toggle_mod)
+        row.addWidget(toggle_btn)
+
+        del_btn = QPushButton("Удалить")
+        del_btn.clicked.connect(self._delete_mod)
+        row.addWidget(del_btn)
+
+        open_btn = QPushButton("Открыть папку")
+        open_btn.clicked.connect(self._open_mods_dir)
+        row.addWidget(open_btn)
+
+        refresh_btn = QPushButton("Обновить")
+        refresh_btn.clicked.connect(self._refresh_mods)
+        row.addWidget(refresh_btn)
+        row.addStretch(1)
+        lay.addLayout(row)
+
+        self.mods_list = QListWidget()
+        self.mods_list.setSelectionMode(QListWidget.ExtendedSelection)
+        lay.addWidget(self.mods_list, 1)
+
+        self.mods_status = QLabel()
+        self.mods_status.setObjectName("Muted")
+        lay.addWidget(self.mods_status)
+
+        self._refresh_mods()
         return page
 
     # --- страница «Настройки» ----------------------------------------------
@@ -441,6 +500,90 @@ class MainWindow(QWidget):
         self.mc = Minecraft(CONFIG.get("game_dir"))
         self.settings_status.setText("Настройки сохранены ✔")
         self._update_java_hint()
+        self._refresh_mods()
+
+    # --- моды ---------------------------------------------------------------
+    def _mods_dir(self) -> Path:
+        return Path(CONFIG.get("game_dir") or str(CONFIG.game_dir)) / "mods"
+
+    def _refresh_mods(self) -> None:
+        d = self._mods_dir()
+        try:
+            d.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            self.mods_status.setText(f"Не удалось открыть папку модов: {e}")
+            return
+        self.mods_path_label.setText(f"Папка модов: {d}")
+        self.mods_list.clear()
+        files = sorted(
+            (
+                p
+                for p in d.iterdir()
+                if p.is_file() and (p.name.endswith(".jar") or p.name.endswith(".jar.disabled"))
+            ),
+            key=lambda p: p.name.lower(),
+        )
+        for p in files:
+            if p.name.endswith(".jar.disabled"):
+                self.mods_list.addItem(QListWidgetItem(f"○ {p.name[:-len('.disabled')]}"))
+            else:
+                self.mods_list.addItem(QListWidgetItem(f"● {p.name}"))
+            self.mods_list.item(self.mods_list.count() - 1).setData(Qt.UserRole, str(p))
+        self.mods_status.setText(f"Модов в папке: {len(files)}")
+
+    def _selected_mod_paths(self) -> list[Path]:
+        return [Path(item.data(Qt.UserRole)) for item in self.mods_list.selectedItems()]
+
+    def _add_mods(self) -> None:
+        files, _ = QFileDialog.getOpenFileNames(
+            self, "Добавить моды", "", "Моды (*.jar);;Все файлы (*)"
+        )
+        if not files:
+            return
+        d = self._mods_dir()
+        d.mkdir(parents=True, exist_ok=True)
+        added = 0
+        for f in files:
+            try:
+                shutil.copy2(f, d / Path(f).name)
+                added += 1
+            except Exception as e:
+                self.mods_status.setText(f"Ошибка при копировании {Path(f).name}: {e}")
+        self._refresh_mods()
+        self.mods_status.setText(f"Добавлено модов: {added}")
+
+    def _toggle_mod(self) -> None:
+        paths = self._selected_mod_paths()
+        if not paths:
+            self.mods_status.setText("Выбери мод в списке")
+            return
+        for p in paths:
+            try:
+                if p.name.endswith(".jar.disabled"):
+                    p.rename(p.with_name(p.name[: -len(".disabled")]))
+                elif p.name.endswith(".jar"):
+                    p.rename(p.with_name(p.name + ".disabled"))
+            except Exception as e:
+                self.mods_status.setText(f"Ошибка: {e}")
+        self._refresh_mods()
+
+    def _delete_mod(self) -> None:
+        paths = self._selected_mod_paths()
+        if not paths:
+            self.mods_status.setText("Выбери мод в списке")
+            return
+        for p in paths:
+            try:
+                p.unlink()
+            except Exception as e:
+                self.mods_status.setText(f"Ошибка: {e}")
+        self._refresh_mods()
+        self.mods_status.setText(f"Удалено модов: {len(paths)}")
+
+    def _open_mods_dir(self) -> None:
+        d = self._mods_dir()
+        d.mkdir(parents=True, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(d)))
 
     # --- запуск -------------------------------------------------------------
     def _play(self) -> None:
