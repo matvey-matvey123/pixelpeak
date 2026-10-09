@@ -1,9 +1,11 @@
 """Окно входа/регистрации PixelPeak."""
 from __future__ import annotations
 
+import logging
+
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QDesktopServices
 from PySide6.QtCore import QUrl
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QCheckBox,
     QFrame,
@@ -18,6 +20,8 @@ from PySide6.QtWidgets import (
 
 from core.config import CONFIG
 from ui.workers import LoginWorker
+
+log = logging.getLogger("pixelpeak.login")
 
 
 class LoginWindow(QWidget):
@@ -185,6 +189,8 @@ class LoginWindow(QWidget):
                 self.status.setText("Введи email")
                 return
 
+        log.info("submit: mode=%s username=%r offline=%s", mode, username, self.offline.isChecked())
+
         self._set_busy(True)
         self.status.setText("Подключение...")
         self._worker = LoginWorker(
@@ -216,9 +222,11 @@ class LoginWindow(QWidget):
 
     def _on_success(self, account) -> None:
         self._set_busy(False)
+        log.info("login success: %s", getattr(account, "username", account))
         self.status.setText(f"Привет, {account.username}!")
         self.logged_in.emit(account)
 
     def _on_failed(self, message: str) -> None:
         self._set_busy(False)
+        log.warning("login failed: %s", message)
         self.status.setText(message)

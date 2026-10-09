@@ -1,6 +1,7 @@
 """Фоновые потоки: вход, установка версий и запуск игры."""
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 import sys
@@ -10,6 +11,8 @@ from PySide6.QtCore import QThread, Signal
 
 from core.auth import AuthManager
 from core.minecraft import Minecraft, MinecraftError
+
+log = logging.getLogger("pixelpeak.workers")
 
 
 def _make_callback(signals: "InstallWorker") -> dict:
@@ -35,17 +38,20 @@ class LoginWorker(QThread):
 
     def run(self) -> None:
         auth = AuthManager()
+        log.info("login worker: mode=%s username=%r", self.mode, self.username)
         try:
             if self.mode == "offline":
                 self.status.emit("Проверяем ник...")
                 try:
                     from core.api import PixelPeakAPI
 
-                    if PixelPeakAPI().user_exists(self.username):
+                    exists = PixelPeakAPI().user_exists(self.username)
+                    log.debug("user_exists(%r) = %s", self.username, exists)
+                    if exists:
                         self.needs_password.emit(self.username)
                         return
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.warning("user_exists check failed: %s", e)
                 self.status.emit("Вход по нику (офлайн)...")
                 acc = auth.login_offline(self.username)
             elif self.mode == "register":
@@ -54,8 +60,10 @@ class LoginWorker(QThread):
             else:
                 self.status.emit("Подключаемся к PixelPeak...")
                 acc = auth.login(self.username, self.password)
+            log.info("login worker success: %s", getattr(acc, "username", acc))
             self.success.emit(acc)
         except Exception as e:
+            log.exception("login worker failed")
             self.failed.emit(str(e))
 
 

@@ -12,9 +12,15 @@ BASE_DIR = Path(__file__).resolve().parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
+from core.log import get_logger, setup_logging
+
+setup_logging()
+
 from ui.login_window import LoginWindow
 from ui.main_window import MainWindow
 from ui.styles import QSS
+
+log = get_logger()
 
 APP_ID = "PixelPeak.Launcher.1"
 
