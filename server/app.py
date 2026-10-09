@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import os
 import re
 import time
@@ -295,6 +296,38 @@ def user_profile(user_uuid: str) -> dict:
         "has_skin": has_skin,
         "skin_url": f"/api/skin/{u['uuid']}" if has_skin else None,
     }
+
+
+# --- CustomSkinLoader (скины в игре) ---------------------------------------
+
+_csl_hashes: dict[str, int] = {}
+
+
+@app.get("/api/csl/{username}.json")
+def csl_profile(username: str) -> JSONResponse:
+    u = db.get_user_by_username(username)
+    rec = db.get_media(u["id"], "skin") if u else None
+    if not rec:
+        raise HTTPException(status_code=404, detail="Not found")
+    digest = hashlib.sha256(base64.b64decode(rec["data"])).hexdigest()
+    _csl_hashes[digest] = u["id"]
+    return JSONResponse(
+        {"username": u["username"], "skin": digest, "textures": {"default": digest}},
+        headers={"Cache-Control": "public, max-age=120"},
+    )
+
+
+@app.get("/api/csl/textures/{digest}")
+def csl_texture(digest: str):
+    user_id = _csl_hashes.get(digest.lower())
+    rec = db.get_media(user_id, "skin") if user_id is not None else None
+    if not rec:
+        raise HTTPException(status_code=404, detail="Not found")
+    return Response(
+        content=base64.b64decode(rec["data"]),
+        media_type=rec["type"],
+        headers={"Cache-Control": "public, max-age=120"},
+    )
 
 
 # --- группы -----------------------------------------------------------------

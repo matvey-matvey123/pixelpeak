@@ -77,6 +77,18 @@ class PixelPeakAPI:
         )
         return self._handle(resp)
 
+    def fetch_avatar(self, uuid: str) -> Optional[bytes]:
+        """Возвращает байты аватарки или None, если её нет."""
+        if not uuid:
+            return None
+        try:
+            resp = requests.get(self._url(f"/api/avatar/{uuid}"), timeout=self.timeout)
+            if resp.ok and resp.content:
+                return resp.content
+        except Exception:
+            pass
+        return None
+
     def logout(self, token: str) -> None:
         try:
             requests.post(

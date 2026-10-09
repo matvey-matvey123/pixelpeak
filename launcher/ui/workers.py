@@ -15,6 +15,24 @@ from core.minecraft import Minecraft, MinecraftError
 log = logging.getLogger("pixelpeak.workers")
 
 
+class AvatarWorker(QThread):
+    loaded = Signal(bytes)
+
+    def __init__(self, uuid: str) -> None:
+        super().__init__()
+        self.uuid = uuid
+
+    def run(self) -> None:
+        try:
+            from core.api import PixelPeakAPI
+
+            data = PixelPeakAPI(timeout=10).fetch_avatar(self.uuid)
+            if data:
+                self.loaded.emit(data)
+        except Exception:
+            log.debug("avatar fetch failed", exc_info=True)
+
+
 def _make_callback(signals: "InstallWorker") -> dict:
     return {
         "setStatus": lambda text: signals.status.emit(str(text)),

@@ -27,6 +27,9 @@ DEFAULTS: dict[str, Any] = {
     "token": "",
     "uuid": "",
     "ram_mb": 4096,
+    "max_fps": 260,
+    "vsync": False,
+    "skin_in_game": True,
     "java_path": "",
     "game_dir": str(DEFAULT_GAME_DIR),
     "last_version": "",
@@ -67,7 +70,6 @@ class Config:
     def update(self, **kwargs: Any) -> None:
         self._data.update(kwargs)
         self.save()
-
     @property
     def game_dir(self) -> Path:
         return Path(self.get("game_dir") or str(DEFAULT_GAME_DIR))

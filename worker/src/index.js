@@ -55,6 +55,17 @@ export default {
         return await getUserProfile(env, cors, pathname.slice("/api/user/".length));
       }
 
+      // --- CustomSkinLoader (скины в игре) ---
+      if (pathname.startsWith("/api/csl/") && request.method === "GET") {
+        const rest = pathname.slice("/api/csl/".length);
+        if (rest.startsWith("textures/")) {
+          return await cslTexture(env, cors, rest.slice("textures/".length));
+        }
+        if (rest.endsWith(".json")) {
+          return await cslProfile(env, cors, rest.slice(0, -5));
+        }
+      }
+
       // --- группы ---
       if (pathname === "/api/groups" && request.method === "GET") {
         return await listGroups(request, env, cors);
@@ -376,6 +387,40 @@ async function getUserProfile(env, cors, uuid) {
     200,
     cors
   );
+}
+
+// --- CustomSkinLoader -------------------------------------------------------
+
+async function sha256hex(input) {
+  const data = typeof input === "string" ? new TextEncoder().encode(input) : input;
+  const buf = await crypto.subtle.digest("SHA-256", data);
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function cslProfile(env, cors, username) {
+  const name = decodeURIComponent(String(username || "")).toLowerCase();
+  const id = await env.KV.get("name:" + name);
+  if (!id) return json({ detail: "Not found" }, 404, cors);
+  const u = await getJSON(env, "user:" + id);
+  if (!u || !u.has_skin) return json({ detail: "No skin" }, 404, cors);
+  const rec = await getJSON(env, "skin:" + id);
+  if (!rec || !rec.data) return json({ detail: "No skin" }, 404, cors);
+
+  const bytes = b64decode(rec.data);
+  const hash = await sha256hex(bytes);
+  await env.KV.put("csltex:" + hash, String(id));
+  return json({ username: u.username, skin: hash, textures: { default: hash } }, 200, cors);
+}
+
+async function cslTexture(env, cors, hash) {
+  const id = await env.KV.get("csltex:" + String(hash || "").toLowerCase());
+  if (!id) return new Response("Not found", { status: 404, headers: cors });
+  const rec = await getJSON(env, "skin:" + id);
+  if (!rec || !rec.data) return new Response("Not found", { status: 404, headers: cors });
+  return new Response(b64decode(rec.data), {
+    status: 200,
+    headers: { "Content-Type": rec.type || "image/png", "Cache-Control": "public, max-age=120", ...cors },
+  });
 }
 
 // --- группы ----------------------------------------------------------------

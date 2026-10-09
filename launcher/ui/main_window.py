@@ -6,7 +6,7 @@ import shutil
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QUrl, Signal
-from PySide6.QtGui import QDesktopServices, QIcon
+from PySide6.QtGui import QDesktopServices, QIcon, QPainter, QPainterPath, QPixmap
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
 
 from core.config import CONFIG
 from core.minecraft import LOADERS, Minecraft, MinecraftError
-from ui.workers import InstallWorker, LaunchWorker, VersionListWorker
+from ui.workers import AvatarWorker, InstallWorker, LaunchWorker, VersionListWorker
 
 
 class MainWindow(QWidget):
@@ -47,11 +47,13 @@ class MainWindow(QWidget):
         self._install_worker: InstallWorker | None = None
         self._launch_worker: LaunchWorker | None = None
         self._list_worker: VersionListWorker | None = None
+        self._avatar_worker: AvatarWorker | None = None
 
         self.setObjectName("Root")
         self.setWindowTitle("PixelPeak")
         self.resize(1000, 680)
         self._build()
+        self._load_avatar()
         self._load_versions()
         self._update_java_hint()
 
@@ -351,14 +353,31 @@ class MainWindow(QWidget):
         self.set_ram.setValue(int(CONFIG.get("ram_mb", 4096)))
         row(3, "ОЗУ по умолчанию", self.set_ram)
 
+        self.set_fps = QComboBox()
+        self.set_fps.addItem("Без ограничения", 260)
+        for v in (30, 60, 75, 120, 144, 165, 240):
+            self.set_fps.addItem(str(v), v)
+        cur_fps = int(CONFIG.get("max_fps", 260) or 260)
+        idx = self.set_fps.findData(cur_fps)
+        self.set_fps.setCurrentIndex(idx if idx >= 0 else 0)
+        row(4, "Лимит FPS", self.set_fps)
+
+        self.set_vsync = QCheckBox("Вертикальная синхронизация (VSync)")
+        self.set_vsync.setChecked(bool(CONFIG.get("vsync", False)))
+        grid.addWidget(self.set_vsync, 5, 1)
+
+        self.set_skin = QCheckBox("Показывать мой скин в Minecraft (CustomSkinLoader)")
+        self.set_skin.setChecked(bool(CONFIG.get("skin_in_game", True)))
+        grid.addWidget(self.set_skin, 6, 1)
+
         self.set_close = QCheckBox("Закрывать лаунчер после запуска игры")
         self.set_close.setChecked(bool(CONFIG.get("close_on_launch", False)))
-        grid.addWidget(self.set_close, 4, 1)
+        grid.addWidget(self.set_close, 7, 1)
 
         self.java_hint = QLabel("")
         self.java_hint.setObjectName("Muted")
         self.java_hint.setWordWrap(True)
-        grid.addWidget(self.java_hint, 5, 0, 1, 3)
+        grid.addWidget(self.java_hint, 8, 0, 1, 3)
 
         lay.addWidget(card)
 
@@ -404,7 +423,37 @@ class MainWindow(QWidget):
         lbl.setObjectName("Muted")
         return lbl
 
-    # --- версии -------------------------------------------------------------
+    # --- аватарка -----------------------------------------------------------
+    def _load_avatar(self) -> None:
+        uuid = getattr(self.account, "uuid", "")
+        if not uuid:
+            return
+        self._avatar_worker = AvatarWorker(uuid)
+        self._avatar_worker.loaded.connect(self._set_avatar_pixmap)
+        self._avatar_worker.start()
+
+    def _set_avatar_pixmap(self, data: bytes) -> None:
+        pix = QPixmap()
+        if not pix.loadFromData(data):
+            return
+        size = 64
+        pix = pix.scaled(size, size, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+        x = max(0, (pix.width() - size) // 2)
+        y = max(0, (pix.height() - size) // 2)
+        pix = pix.copy(x, y, size, size)
+        rounded = QPixmap(size, size)
+        rounded.fill(Qt.transparent)
+        painter = QPainter(rounded)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        path = QPainterPath()
+        path.addEllipse(0, 0, size, size)
+        painter.setClipPath(path)
+        painter.drawPixmap(0, 0, pix)
+        painter.end()
+        self.avatar.setPixmap(rounded)
+        self.avatar.setText("")
+        self.avatar.setStyleSheet("background: transparent;")
+
     def _load_versions(self) -> None:
         self.status.setText("Загружаем список версий...")
         self._list_worker = VersionListWorker(self.mc)
@@ -495,6 +544,9 @@ class MainWindow(QWidget):
             java_path=self.set_java.text().strip(),
             game_dir=self.set_dir.text().strip() or str(CONFIG.game_dir),
             ram_mb=self.set_ram.value(),
+            max_fps=int(self.set_fps.currentData() or 260),
+            vsync=self.set_vsync.isChecked(),
+            skin_in_game=self.set_skin.isChecked(),
             close_on_launch=self.set_close.isChecked(),
         )
         self.mc = Minecraft(CONFIG.get("game_dir"))
@@ -616,6 +668,22 @@ class MainWindow(QWidget):
         self._log_play(f"[!] {message}")
 
     def _do_launch(self, version_id: str) -> None:
+        self.mc.apply_video_settings(
+            max_fps=int(CONFIG.get("max_fps", 260) or 260),
+            vsync=bool(CONFIG.get("vsync", False)),
+        )
+        if CONFIG.get("skin_in_game", True):
+            loader = self.loader_combo.currentData()
+            if loader and loader != "vanilla":
+                try:
+                    self._log_play("> Устанавливаем скин-загрузчик (CustomSkinLoader)...")
+                    name = self.mc.install_skin_loader(
+                        self.version_combo.currentText().strip(), loader
+                    )
+                    if name:
+                        self._log_play(f"> Скин-загрузчик готов: {name}")
+                except Exception as e:
+                    self._log_play(f"[!] Скин-загрузчик: {e}")
         self.status.setText("Запуск Minecraft...")
         self.progress.setRange(0, 0)
         self._log_play(f"> Запуск {version_id}")

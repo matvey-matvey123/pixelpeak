@@ -1,10 +1,12 @@
 """Обёртка над minecraft-launcher-lib: установка версий/загрузчиков и запуск."""
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import Callable, Optional
 
+import requests
 import minecraft_launcher_lib as mll
 from minecraft_launcher_lib import command, install, java_utils, mod_loader, utils
 
@@ -165,3 +167,90 @@ class Minecraft:
 
     def is_installed(self, version_id: str) -> bool:
         return version_id in self.installed_versions()
+
+    # --- FPS / графика ------------------------------------------------------
+
+    def apply_video_settings(self, max_fps: int = 260, vsync: bool = False) -> None:
+        """Прописывает лимит FPS и VSync в options.txt (снимает кап 60)."""
+        opts = Path(self.game_dir) / "options.txt"
+        try:
+            lines = opts.read_text(encoding="utf-8").splitlines() if opts.exists() else []
+        except Exception:
+            lines = []
+
+        def setkey(key: str, value: str) -> None:
+            for i, line in enumerate(lines):
+                if line.split(":", 1)[0] == key:
+                    lines[i] = f"{key}:{value}"
+                    return
+            lines.append(f"{key}:{value}")
+
+        try:
+            fps = int(max_fps) or 260
+        except Exception:
+            fps = 260
+        setkey("maxFps", str(fps))
+        setkey("enableVsync", "true" if vsync else "false")
+        try:
+            opts.parent.mkdir(parents=True, exist_ok=True)
+            opts.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        except Exception:
+            pass
+
+    # --- скин в игре (CustomSkinLoader) ------------------------------------
+
+    def install_skin_loader(self, mc_version: str, loader_id: str) -> Optional[str]:
+        if loader_id in ("", None, "vanilla"):
+            return None
+        loader = {"fabric": "fabric", "forge": "forge", "neoforge": "neoforge", "quilt": "quilt"}.get(loader_id)
+        if not loader:
+            return None
+
+        headers = {"User-Agent": "PixelPeak/1.0.0 (github.com/matvey-matvey123/pixelpeak)"}
+        files: list[dict] = []
+        attempts = [
+            {"loaders": json.dumps([loader]), "game_versions": json.dumps([mc_version])},
+            {"loaders": json.dumps([loader])},
+        ]
+        for params in attempts:
+            try:
+                r = requests.get(
+                    "https://api.modrinth.com/v2/project/customskinloader/version",
+                    params=params,
+                    headers=headers,
+                    timeout=20,
+                )
+                if r.ok:
+                    versions = r.json()
+                    if versions:
+                        files = versions[0].get("files") or []
+                        break
+            except Exception:
+                continue
+        if not files:
+            raise MinecraftError("CustomSkinLoader не найден для этой версии/загрузчика")
+
+        primary = next((f for f in files if f.get("primary")), files[0])
+        url, fname = primary.get("url"), primary.get("filename") or "CustomSkinLoader.jar"
+        if not url:
+            raise MinecraftError("Не удалось получить ссылку на CustomSkinLoader")
+
+        mods = Path(self.game_dir) / "mods"
+        mods.mkdir(parents=True, exist_ok=True)
+        try:
+            content = requests.get(url, headers=headers, timeout=90).content
+            (mods / fname).write_bytes(content)
+        except Exception as e:
+            raise MinecraftError(f"Не удалось скачать скин-загрузчик: {e}")
+
+        root = (CONFIG.get("api_base") or "").rstrip("/") + "/api/csl/"
+        el = Path(self.game_dir) / "CustomSkinLoader" / "ExtraList"
+        el.mkdir(parents=True, exist_ok=True)
+        (el / "pixelpeak.json").write_text(
+            json.dumps(
+                {"name": "PixelPeak", "type": "CustomSkinAPI", "root": root},
+                ensure_ascii=False, indent=2,
+            ),
+            encoding="utf-8",
+        )
+        return fname
