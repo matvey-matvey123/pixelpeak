@@ -1,6 +1,12 @@
 /**
- * PixelPeak API — Cloudflare Worker + D1.
+ * PixelPeak API — Cloudflare Worker + KV.
  * Совместим по API с server/ (FastAPI): /api/health, /api/register, /api/login, /api/me, /api/logout.
+ *
+ * Хранилище: Workers KV.
+ *   user:<id>            -> { id, username, email, password_hash, uuid, is_admin, created_at, last_login }
+ *   name:<lowername>     -> <id>
+ *   email:<loweremail>   -> <id>
+ *   session:<token>      -> { uid }   (auto-expire через expirationTtl)
  */
 export default {
   async fetch(request, env) {
@@ -14,7 +20,7 @@ export default {
     try {
       const { pathname } = url;
       if (pathname === "/api/health" && request.method === "GET") {
-        return json({ status: "ok", service: "PixelPeak (Worker)", time: unix() }, 200, cors);
+        return json({ status: "ok", service: "PixelPeak (Worker/KV)", time: unix() }, 200, cors);
       }
       if (pathname === "/api/register" && request.method === "POST") {
         return await register(request, env, cors);
@@ -81,6 +87,16 @@ function randomToken() {
   return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+// --- KV helpers -------------------------------------------------------------
+
+async function getJSON(env, key) {
+  return await env.KV.get(key, "json");
+}
+
+async function putJSON(env, key, value, opts) {
+  await env.KV.put(key, JSON.stringify(value), opts);
+}
+
 // --- пароли (совместимо с pbkdf2_sha256 из Python-бэкенда) ------------------
 
 function b64encode(bytes) {
@@ -143,22 +159,30 @@ async function register(request, env, cors) {
   if (!EMAIL_RE.test(email)) return json({ detail: "Некорректный email" }, 422, cors);
   if (password.length < 6) return json({ detail: "Пароль минимум 6 символов" }, 422, cors);
 
-  const dupName = await env.DB.prepare("SELECT id FROM users WHERE username = ? COLLATE NOCASE").bind(username).first();
-  if (dupName) return json({ detail: "Такой ник уже занят" }, 409, cors);
-  const dupMail = await env.DB.prepare("SELECT id FROM users WHERE email = ? COLLATE NOCASE").bind(email).first();
-  if (dupMail) return json({ detail: "Email уже зарегистрирован" }, 409, cors);
+  const uname = username.toLowerCase();
+  if (await env.KV.get("name:" + uname)) return json({ detail: "Такой ник уже занят" }, 409, cors);
+  if (await env.KV.get("email:" + email)) return json({ detail: "Email уже зарегистрирован" }, 409, cors);
 
   const iterations = parseInt(env.PBKDF2_ITERATIONS || DEFAULT_ITERATIONS, 10);
   const hash = await hashPassword(password, iterations);
-  const uuid = offlineUuid(username);
+  const id = Date.now();
   const now = unix();
+  const user = {
+    id,
+    username,
+    email,
+    password_hash: hash,
+    uuid: offlineUuid(username),
+    is_admin: 0,
+    created_at: now,
+    last_login: now,
+  };
 
-  const res = await env.DB.prepare(
-    "INSERT INTO users (username, email, password_hash, uuid, created_at) VALUES (?, ?, ?, ?, ?)"
-  ).bind(username, email, hash, uuid, now).run();
+  await putJSON(env, "user:" + id, user);
+  await env.KV.put("name:" + uname, String(id));
+  await env.KV.put("email:" + email, String(id));
 
-  const user = await env.DB.prepare("SELECT * FROM users WHERE id = ?").bind(res.meta.last_row_id).first();
-  const token = await createSession(env, user.id);
+  const token = await createSession(env, id);
   return json({ token, user: publicUser(user) }, 201, cors);
 }
 
@@ -167,16 +191,20 @@ async function login(request, env, cors) {
   const username = String(body.username ?? "").trim();
   const password = String(body.password ?? "");
 
-  let user = await env.DB.prepare("SELECT * FROM users WHERE username = ? COLLATE NOCASE").bind(username).first();
-  if (!user) {
-    user = await env.DB.prepare("SELECT * FROM users WHERE email = ? COLLATE NOCASE").bind(username.toLowerCase()).first();
-  }
+  const key = username.toLowerCase();
+  let id = await env.KV.get("name:" + key);
+  if (!id) id = await env.KV.get("email:" + key);
+  if (!id) return json({ detail: "Неверный ник или пароль" }, 401, cors);
+
+  const user = await getJSON(env, "user:" + id);
   if (!user || !(await verifyPassword(password, user.password_hash))) {
     return json({ detail: "Неверный ник или пароль" }, 401, cors);
   }
 
-  await env.DB.prepare("UPDATE users SET last_login = ? WHERE id = ?").bind(unix(), user.id).run();
-  const token = await createSession(env, user.id);
+  user.last_login = unix();
+  await putJSON(env, "user:" + id, user);
+
+  const token = await createSession(env, id);
   return json({ token, user: publicUser(user) }, 200, cors);
 }
 
@@ -188,26 +216,21 @@ async function me(request, env, cors) {
 
 async function logout(request, env, cors) {
   const token = bearer(request);
-  if (token) await env.DB.prepare("DELETE FROM sessions WHERE token = ?").bind(token).run();
+  if (token) await env.KV.delete("session:" + token);
   return json({ ok: true }, 200, cors);
 }
 
 async function userFromRequest(request, env) {
   const token = bearer(request);
   if (!token) return null;
-  const session = await env.DB.prepare(
-    "SELECT * FROM sessions WHERE token = ? AND expires_at > ?"
-  ).bind(token, unix()).first();
+  const session = await getJSON(env, "session:" + token);
   if (!session) return null;
-  return await env.DB.prepare("SELECT * FROM users WHERE id = ?").bind(session.user_id).first();
+  return await getJSON(env, "user:" + session.uid);
 }
 
 async function createSession(env, userId) {
   const token = randomToken();
-  const now = unix();
-  await env.DB.prepare(
-    "INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)"
-  ).bind(token, userId, now, now + SESSION_TTL).run();
+  await putJSON(env, "session:" + token, { uid: userId }, { expirationTtl: SESSION_TTL });
   return token;
 }
 
@@ -367,7 +390,7 @@ function rhex(n) {
   for (let j = 0; j < 4; j++) {
     for (let i = 0; i < 4; i++) {
       s += hexChars.charAt((n[(j * 4 + i) >> 2] >> ((i * 8) % 32 + 4)) & 0x0f);
-      s += hexChars.charAt((n[(j * 4 + i) >> 2] >> (((i * 8) % 32))) & 0x0f);
+      s += hexChars.charAt((n[(j * 4 + i) >> 2] >> ((i * 8) % 32)) & 0x0f);
     }
   }
   return s;
