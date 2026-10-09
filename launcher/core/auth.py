@@ -2,12 +2,17 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import uuid
 from dataclasses import dataclass, asdict
 from typing import Optional
 
-from .api import PixelPeakAPI, ApiError
+from .api import PixelPeakAPI
 from .config import CONFIG
+
+log = logging.getLogger("pixelpeak.auth")
+
+OFFLINE_TOKEN = "0" * 32
 
 
 @dataclass
@@ -72,29 +77,35 @@ class AuthManager:
         return acc
 
     def restore(self) -> Optional[Account]:
-        token = CONFIG.get("token")
         username = CONFIG.get("username")
         if not username:
             return None
-        acc = Account(
-            username=username,
-            uuid=CONFIG.get("uuid") or offline_uuid(username),
-            token=token or "",
-        )
-        if token:
+        token = CONFIG.get("token") or ""
+        uuid = CONFIG.get("uuid") or ""
+
+        if token and token != "0" * 32:
             try:
-                user = PixelPeakAPI().me(token)
-                acc.username = user.get("username", username)
-                acc.uuid = user.get("uuid") or acc.uuid
-                acc.email = user.get("email", "")
-                acc.is_admin = bool(user.get("is_admin"))
-                self._persist(acc)
-            except ApiError:
-                acc.token = ""
-            except Exception:
-                pass
-        self.account = acc
-        return acc
+                user = PixelPeakAPI(timeout=8).me(token)
+            except Exception as e:
+                log.info("session restore failed (%s); нужно войти заново", e)
+                return None
+            acc = Account(
+                username=user.get("username", username),
+                uuid=user.get("uuid") or offline_uuid(username),
+                email=user.get("email", ""),
+                token=token,
+                is_admin=bool(user.get("is_admin")),
+            )
+            self._persist(acc)
+            log.info("session restored for %s", acc.username)
+            return acc
+
+        if uuid:
+            acc = Account(username=username, uuid=uuid, token="")
+            self.account = acc
+            log.info("offline session restored for %s", acc.username)
+            return acc
+        return None
 
     def logout(self) -> None:
         token = CONFIG.get("token")

@@ -12,6 +12,7 @@ BASE_DIR = Path(__file__).resolve().parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
+from core.auth import AuthManager
 from core.log import get_logger, setup_logging
 
 setup_logging()
@@ -71,7 +72,16 @@ def main() -> int:
         state["main"] = main_win
         main_win.show()
 
-    show_login()
+    account = None
+    try:
+        account = AuthManager().restore()
+    except Exception:
+        log.exception("Не удалось восстановить сессию")
+
+    if account and account.username:
+        on_logged_in(account)
+    else:
+        show_login()
 
     return app.exec()
 
