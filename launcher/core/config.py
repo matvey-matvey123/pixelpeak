@@ -20,7 +20,9 @@ DEFAULT_GAME_DIR = appdata_dir() / "minecraft"
 CONFIG_PATH = appdata_dir() / "config.json"
 
 DEFAULTS: dict[str, Any] = {
-    "api_base": os.environ.get("PIXELPEAK_API", "http://127.0.0.1:8000"),
+    "api_base": os.environ.get(
+        "PIXELPEAK_API", "https://pixelpeak-api.matveygorvat.workers.dev"
+    ),
     "username": "",
     "token": "",
     "uuid": "",
