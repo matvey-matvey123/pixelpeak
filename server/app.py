@@ -23,6 +23,12 @@ import database as db
 import security as sec
 
 SESSION_TTL = 60 * 60 * 24 * 30  # 30 дней
+ADMIN_KEY_TTL = 60 * 60 * 12  # 12 часов
+ADMIN_PASSWORD_HASH = os.environ.get(
+    "PIXELPEAK_ADMIN_PASSWORD_HASH",
+    "42e75ca549bd97318b9bc1d046854394f03aecf3f97bd3ece7ed3458214171fd",
+)
+_admin_keys: dict[str, float] = {}
 
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_]{3,16}$")
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -178,10 +184,17 @@ def current_user(authorization: Optional[str]) -> dict:
     return user
 
 
-def require_admin(authorization: Optional[str]) -> dict:
+def require_admin(authorization: Optional[str], admin_key: Optional[str]) -> dict:
     user = current_user(authorization)
     if not user["is_admin"]:
         raise HTTPException(status_code=403, detail="Нет доступа")
+    key = (admin_key or "").strip()
+    if not key:
+        raise HTTPException(status_code=401, detail="Введите пароль админ-панели")
+    ts = _admin_keys.get(key)
+    if ts is None or ts < time.time():
+        _admin_keys.pop(key, None)
+        raise HTTPException(status_code=401, detail="Пароль неверный или истёк")
     return user
 
 
@@ -465,9 +478,24 @@ class AdminFlagPayload(BaseModel):
     admin: bool = True
 
 
+class AdminUnlockPayload(BaseModel):
+    password: str
+
+
+@app.post("/api/admin/unlock")
+def admin_unlock(payload: AdminUnlockPayload) -> dict:
+    digest = hashlib.sha256(payload.password.encode("utf-8")).hexdigest()
+    if digest != ADMIN_PASSWORD_HASH:
+        raise HTTPException(status_code=401, detail="Неверный пароль")
+    key = sec.new_token()
+    _admin_keys[key] = time.time() + ADMIN_KEY_TTL
+    return {"ok": True, "key": key, "ttl": ADMIN_KEY_TTL}
+
+
 @app.get("/api/admin/users")
-def admin_users(authorization: Optional[str] = Header(default=None)) -> dict:
-    require_admin(authorization)
+def admin_users(authorization: Optional[str] = Header(default=None),
+                admin_key: Optional[str] = Header(default=None, alias="X-Admin-Key")) -> dict:
+    require_admin(authorization, admin_key)
     now = int(time.time())
     all_users = db.list_users()
     users = [_admin_user_row(u) for u in all_users]
@@ -485,8 +513,9 @@ def admin_users(authorization: Optional[str] = Header(default=None)) -> dict:
 
 
 @app.get("/api/admin/users/{user_uuid}")
-def admin_user_detail(user_uuid: str, authorization: Optional[str] = Header(default=None)) -> dict:
-    require_admin(authorization)
+def admin_user_detail(user_uuid: str, authorization: Optional[str] = Header(default=None),
+                      admin_key: Optional[str] = Header(default=None, alias="X-Admin-Key")) -> dict:
+    require_admin(authorization, admin_key)
     u = db.get_user_by_uuid(user_uuid)
     if not u:
         raise HTTPException(status_code=404, detail="Пользователь не найден")
@@ -506,8 +535,9 @@ def admin_user_detail(user_uuid: str, authorization: Optional[str] = Header(defa
 
 @app.post("/api/admin/users/{user_uuid}/admin")
 def admin_set_admin(user_uuid: str, payload: AdminFlagPayload,
-                    authorization: Optional[str] = Header(default=None)) -> dict:
-    require_admin(authorization)
+                    authorization: Optional[str] = Header(default=None),
+                    admin_key: Optional[str] = Header(default=None, alias="X-Admin-Key")) -> dict:
+    require_admin(authorization, admin_key)
     u = db.get_user_by_uuid(user_uuid)
     if not u:
         raise HTTPException(status_code=404, detail="Пользователь не найден")

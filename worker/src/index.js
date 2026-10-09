@@ -55,7 +55,10 @@ export default {
         return await getUserProfile(env, cors, pathname.slice("/api/user/".length));
       }
 
-      // --- админ (только для is_admin) ---
+      // --- админ (только для is_admin + пароль панели) ---
+      if (pathname === "/api/admin/unlock" && request.method === "POST") {
+        return await adminUnlock(request, env, cors);
+      }
       if (pathname === "/api/admin/users" && request.method === "GET") {
         return await adminListUsers(request, env, cors);
       }
@@ -105,6 +108,7 @@ export default {
 };
 
 const SESSION_TTL = 60 * 60 * 24 * 30;
+const ADMIN_KEY_TTL = 60 * 60 * 12;
 const DEFAULT_ITERATIONS = 10000;
 const USERNAME_RE = /^[A-Za-z0-9_]{3,16}$/;
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
@@ -406,10 +410,32 @@ async function getUserProfile(env, cors, uuid) {
 
 // --- админ -----------------------------------------------------------------
 
+async function adminUnlock(request, env, cors) {
+  const expected = String(env.ADMIN_PASSWORD_HASH || "").toLowerCase();
+  if (!expected) return json({ detail: "Пароль админ-панели не настроен" }, 500, cors);
+
+  const body = await readJson(request);
+  const password = String(body.password || "");
+  const digest = await sha256hex(password);
+  if (digest !== expected) {
+    return json({ detail: "Неверный пароль" }, 401, cors);
+  }
+
+  const key = randomToken();
+  await putJSON(env, "adminkey:" + key, { ts: unix() }, { expirationTtl: ADMIN_KEY_TTL });
+  return json({ ok: true, key, ttl: ADMIN_KEY_TTL }, 200, cors);
+}
+
 async function requireAdmin(request, env, cors) {
   const user = await userFromRequest(request, env);
   if (!user) return { error: json({ detail: "Требуется вход" }, 401, cors) };
   if (!user.is_admin) return { error: json({ detail: "Нет доступа" }, 403, cors) };
+
+  const key = (request.headers.get("X-Admin-Key") || "").trim();
+  if (!key) return { error: json({ detail: "Введите пароль админ-панели" }, 401, cors) };
+  const rec = await getJSON(env, "adminkey:" + key);
+  if (!rec) return { error: json({ detail: "Пароль неверный или истёк" }, 401, cors) };
+
   return { user };
 }
 

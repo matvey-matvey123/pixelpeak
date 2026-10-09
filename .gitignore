@@ -25,3 +25,4 @@ launcher/installer/PixelPeakSetup.exe
 .DS_Store
 Thumbs.db
 .pytest_cache/
+worker/.wrangler/

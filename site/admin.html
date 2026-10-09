@@ -25,6 +25,16 @@
       Нет доступа. Эта страница доступна только администраторам.
     </div>
 
+    <section class="profile-card" id="adminLogin" style="display:none">
+      <h2>Вход в админ-панель</h2>
+      <p class="muted">Введите пароль администратора.</p>
+      <form class="group-form" id="adminUnlockForm">
+        <label>Пароль<input type="password" name="password" autocomplete="current-password" placeholder="пароль" /></label>
+        <div class="form-msg" id="adminUnlockMsg"></div>
+        <button class="btn btn-primary" type="submit">Войти</button>
+      </form>
+    </section>
+
     <div id="adminContent">
       <section class="profile-card">
         <h2>Статистика</h2>

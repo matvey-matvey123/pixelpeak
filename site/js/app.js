@@ -13,9 +13,10 @@
     return (CFG.API_BASE || "") + "/api/" + kind + "/" + uuid + (bust ? "?t=" + bust : "");
   }
 
-  async function api(path, { method = "GET", body = null, token = null } = {}) {
+  async function api(path, { method = "GET", body = null, token = null, adminKey = null } = {}) {
     const headers = { "Content-Type": "application/json" };
     if (token) headers["Authorization"] = "Bearer " + token;
+    if (adminKey) headers["X-Admin-Key"] = adminKey;
 
     const res = await fetch(apiUrl(path), {
       method,
@@ -33,7 +34,9 @@
     if (!res.ok) {
       let msg = (data && (data.detail || data.message)) || "Ошибка сервера";
       if (Array.isArray(msg)) msg = msg.map((m) => m.msg || m).join(", ");
-      throw new Error(msg);
+      const err = new Error(msg);
+      err.status = res.status;
+      throw err;
     }
     return data;
   }
@@ -63,6 +66,12 @@
   function clearAuth() {
     localStorage.removeItem("pixelpeak_token");
     localStorage.removeItem("pixelpeak_user");
+  }
+
+  function getAdminKey() { return sessionStorage.getItem("pixelpeak_adminkey") || ""; }
+  function setAdminKey(k) {
+    if (k) sessionStorage.setItem("pixelpeak_adminkey", k);
+    else sessionStorage.removeItem("pixelpeak_adminkey");
   }
 
   // ---- nav ------------------------------------------------------------------
@@ -434,10 +443,7 @@
     renderNav();
 
     if (!me.is_admin) {
-      const denied = document.getElementById("adminDenied");
-      if (denied) denied.style.display = "";
-      const content = document.getElementById("adminContent");
-      if (content) content.style.display = "none";
+      showAdminDenied();
       return;
     }
 
@@ -451,19 +457,68 @@
       renderUsers(filtered);
     });
 
+    const unlockForm = document.getElementById("adminUnlockForm");
+    if (unlockForm) unlockForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const msg = document.getElementById("adminUnlockMsg");
+      const fd = new FormData(unlockForm);
+      try {
+        setMsg(msg, "Проверяем...", "");
+        const data = await api("/api/admin/unlock", {
+          method: "POST",
+          body: { password: String(fd.get("password") || "") },
+        });
+        setAdminKey(data.key);
+        setMsg(msg, "", "");
+        unlockForm.reset();
+        await loadAdmin();
+      } catch (err) {
+        setMsg(msg, err.message, "err");
+      }
+    });
+
     await loadAdmin();
+  }
+
+  function showAdminDenied() {
+    const denied = document.getElementById("adminDenied");
+    if (denied) denied.style.display = "";
+    const login = document.getElementById("adminLogin");
+    if (login) login.style.display = "none";
+    const content = document.getElementById("adminContent");
+    if (content) content.style.display = "none";
+  }
+
+  function showAdminLogin() {
+    const login = document.getElementById("adminLogin");
+    if (login) login.style.display = "";
+    const content = document.getElementById("adminContent");
+    if (content) content.style.display = "none";
   }
 
   async function loadAdmin() {
     const token = getToken();
+    const adminKey = getAdminKey();
     const statsBox = document.getElementById("adminStats");
+    if (!adminKey) { showAdminLogin(); return; }
     if (statsBox) statsBox.innerHTML = '<p class="muted">Загрузка...</p>';
     try {
-      const data = await api("/api/admin/users", { token });
+      const data = await api("/api/admin/users", { token, adminKey });
       adminUsers = data.users || [];
+      const login = document.getElementById("adminLogin");
+      if (login) login.style.display = "none";
+      const content = document.getElementById("adminContent");
+      if (content) content.style.display = "";
       renderStats(data.stats || {});
       renderUsers(adminUsers);
     } catch (err) {
+      if (err.status === 401) {
+        setAdminKey("");
+        showAdminLogin();
+        const msg = document.getElementById("adminUnlockMsg");
+        setMsg(msg, "Пароль истёк — введите заново", "err");
+        return;
+      }
       if (statsBox) statsBox.innerHTML = '<p class="form-msg err">' + esc(err.message) + "</p>";
     }
   }
@@ -526,12 +581,13 @@
 
   async function openUser(uuid) {
     const token = getToken();
+    const adminKey = getAdminKey();
     const panel = document.getElementById("adminPanel");
     if (!panel) return;
     panel.style.display = "";
     panel.innerHTML = '<p class="muted">Загрузка...</p>';
     try {
-      const u = await api("/api/admin/users/" + uuid, { token });
+      const u = await api("/api/admin/users/" + uuid, { token, adminKey });
       const skin = u.has_skin
         ? '<img class="skin-thumb" src="' + assetUrl(u.uuid, "skin", Date.now()) + '" alt="">'
         : '<span class="muted">нет</span>';
@@ -563,7 +619,7 @@
         try {
           setMsg(msg, "Сохраняем...", "");
           await api("/api/admin/users/" + uuid + "/admin", {
-            method: "POST", token, body: { admin: !u.is_admin },
+            method: "POST", token, adminKey, body: { admin: !u.is_admin },
           });
           setMsg(msg, "Готово", "ok");
           await loadAdmin();
