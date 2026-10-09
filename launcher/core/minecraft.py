@@ -74,21 +74,40 @@ class Minecraft:
                 result.append(p)
         return result
 
+    def _resolve_java(self, path: Optional[str]) -> Optional[str]:
+        """Превращает путь к java.exe, папке JDK или bin в путь к java.exe."""
+        if not path:
+            return None
+        p = Path(path)
+        if p.is_file():
+            return str(p)
+        if p.is_dir():
+            for rel in ("bin/java.exe", "bin/java", "java.exe", "java"):
+                cand = p / rel
+                if cand.is_file():
+                    return str(cand)
+        return None
+
     def find_best_java(self) -> Optional[str]:
-        configured = CONFIG.get("java_path")
-        if configured and Path(configured).exists():
+        configured = self._resolve_java(CONFIG.get("java_path"))
+        if configured:
             return configured
-        candidates = self.java_candidates()
         best, best_ver = None, -1
-        for path in candidates:
+        for path in self.java_candidates():
+            exe = self._resolve_java(path)
+            if not exe:
+                continue
             try:
                 info = java_utils.get_java_information(path)
-                ver = getattr(info, "version", None) or (info.get("version") if isinstance(info, dict) else 0)
+                if isinstance(info, dict):
+                    ver = info.get("version")
+                else:
+                    ver = getattr(info, "version", None)
                 major = int(str(ver).split(".")[0]) if ver else 0
             except Exception:
                 major = 0
             if major > best_ver:
-                best, best_ver = path, major
+                best, best_ver = exe, major
         return best
 
     # --- Установка ----------------------------------------------------------

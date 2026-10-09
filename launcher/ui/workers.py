@@ -1,6 +1,7 @@
 """Фоновые потоки: вход, установка версий и запуск игры."""
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from typing import Optional
@@ -114,6 +115,13 @@ class LaunchWorker(QThread):
 
     def run(self) -> None:
         try:
+            if self.cwd:
+                os.makedirs(self.cwd, exist_ok=True)
+            java = self.command[0] if self.command else ""
+            if java and not os.path.isfile(java):
+                raise MinecraftError(
+                    f"Не найден файл Java: {java}. Укажи путь к java.exe в настройках."
+                )
             flags = 0
             if sys.platform == "win32":
                 flags = subprocess.CREATE_NO_WINDOW  # type: ignore[attr-defined]
