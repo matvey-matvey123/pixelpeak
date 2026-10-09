@@ -23,6 +23,7 @@ class LoginWorker(QThread):
     success = Signal(object)
     failed = Signal(str)
     status = Signal(str)
+    needs_password = Signal(str)
 
     def __init__(self, mode: str, username: str, password: str = "", email: str = "") -> None:
         super().__init__()
@@ -35,6 +36,15 @@ class LoginWorker(QThread):
         auth = AuthManager()
         try:
             if self.mode == "offline":
+                self.status.emit("Проверяем ник...")
+                try:
+                    from core.api import PixelPeakAPI
+
+                    if PixelPeakAPI().user_exists(self.username):
+                        self.needs_password.emit(self.username)
+                        return
+                except Exception:
+                    pass
                 self.status.emit("Вход по нику (офлайн)...")
                 acc = auth.login_offline(self.username)
             elif self.mode == "register":

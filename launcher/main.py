@@ -12,7 +12,6 @@ BASE_DIR = Path(__file__).resolve().parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
-from core.auth import AuthManager
 from ui.login_window import LoginWindow
 from ui.main_window import MainWindow
 from ui.styles import QSS
@@ -66,11 +65,7 @@ def main() -> int:
         state["main"] = main_win
         main_win.show()
 
-    restored = AuthManager().restore()
-    if restored and restored.username:
-        on_logged_in(restored)
-    else:
-        show_login()
+    show_login()
 
     return app.exec()
 

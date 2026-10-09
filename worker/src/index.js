@@ -22,6 +22,9 @@ export default {
       if (pathname === "/api/health" && request.method === "GET") {
         return json({ status: "ok", service: "PixelPeak (Worker/KV)", time: unix() }, 200, cors);
       }
+      if (pathname === "/api/user_exists" && request.method === "GET") {
+        return await userExists(url, env, cors);
+      }
       if (pathname === "/api/register" && request.method === "POST") {
         return await register(request, env, cors);
       }
@@ -240,6 +243,13 @@ async function readJson(request) {
   } catch {
     return {};
   }
+}
+
+async function userExists(url, env, cors) {
+  const username = String(url.searchParams.get("username") || "").trim().toLowerCase();
+  if (!username) return json({ exists: false, username: "" }, 200, cors);
+  const id = await env.KV.get("name:" + username);
+  return json({ exists: !!id, username }, 200, cors);
 }
 
 // --- offline UUID (md5, как в Java offline-mode) ----------------------------

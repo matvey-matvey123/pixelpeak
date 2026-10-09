@@ -116,6 +116,11 @@ class LoginWindow(QWidget):
         self.offline.toggled.connect(self._on_offline)
         self._apply_mode()
 
+        saved = CONFIG.get("username", "")
+        if saved:
+            self.username.setText(saved)
+            self.password.setFocus()
+
     # --- режимы -------------------------------------------------------------
 
     def _on_offline(self, checked: bool) -> None:
@@ -142,12 +147,14 @@ class LoginWindow(QWidget):
             self.switch.setVisible(True)
         else:
             self.title.setText("Вход в аккаунт")
-            self.hint.setText("Используй ник или email и пароль.")
+            self.hint.setText("Аккаунт создаётся на сайте. Введи ник и пароль.")
             self.email.setVisible(False)
             self.password.setVisible(True)
             self.switch.setText("Нет аккаунта? Зарегистрироваться")
             self.submit.setText("Войти")
             self.switch.setVisible(True)
+            if self.username.text().strip():
+                self.password.setFocus()
 
     def _switch_mode(self) -> None:
         self.mode = "register" if self.mode == "login" else "login"
@@ -188,6 +195,7 @@ class LoginWindow(QWidget):
         )
         self._worker.success.connect(self._on_success)
         self._worker.failed.connect(self._on_failed)
+        self._worker.needs_password.connect(self._on_needs_password)
         self._worker.status.connect(self.status.setText)
         self._worker.start()
 
@@ -195,6 +203,16 @@ class LoginWindow(QWidget):
         self.submit.setEnabled(not busy)
         self.switch.setEnabled(not busy)
         self.offline.setEnabled(not busy)
+
+    def _on_needs_password(self, username: str) -> None:
+        self._set_busy(False)
+        self.offline.setChecked(False)
+        self.mode = "login"
+        self._apply_mode()
+        self.status.setText(
+            f"Ник «{username}» зарегистрирован на сайте — введи пароль аккаунта."
+        )
+        self.password.setFocus()
 
     def _on_success(self, account) -> None:
         self._set_busy(False)

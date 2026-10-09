@@ -148,6 +148,13 @@ def login(payload: LoginPayload) -> dict:
     return {"token": token, "user": public_user(user)}
 
 
+@app.get("/api/user_exists")
+def user_exists(username: str = "") -> dict:
+    name = username.strip()
+    u = db.get_user_by_username(name) if name else None
+    return {"exists": u is not None, "username": name}
+
+
 @app.post("/api/logout")
 def logout(authorization: Optional[str] = Header(default=None)) -> dict:
     token = _bearer(authorization)

@@ -51,6 +51,17 @@ class PixelPeakAPI:
         )
         return self._handle(resp)
 
+    def user_exists(self, username: str) -> bool:
+        resp = requests.get(
+            self._url("/api/user_exists"),
+            params={"username": username},
+            timeout=self.timeout,
+        )
+        try:
+            return bool(self._handle(resp).get("exists"))
+        except ApiError:
+            return False
+
     def me(self, token: str) -> dict:
         resp = requests.get(
             self._url("/api/me"),
