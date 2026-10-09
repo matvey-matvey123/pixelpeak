@@ -17,6 +17,8 @@ dist/
 *.spec
 launcher/build/
 launcher/dist/
+launcher/installer/PixelPeak.exe
+launcher/installer/PixelPeakSetup.exe
 
 # Прочее
 .env
