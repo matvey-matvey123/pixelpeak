@@ -55,6 +55,21 @@ export default {
         return await getUserProfile(env, cors, pathname.slice("/api/user/".length));
       }
 
+      // --- админ (только для is_admin) ---
+      if (pathname === "/api/admin/users" && request.method === "GET") {
+        return await adminListUsers(request, env, cors);
+      }
+      if (pathname.startsWith("/api/admin/users/")) {
+        const rest = pathname.slice("/api/admin/users/".length);
+        const [uuid, action] = rest.split("/");
+        if (action === "admin" && request.method === "POST") {
+          return await adminSetAdmin(request, env, cors, uuid);
+        }
+        if (!action && request.method === "GET") {
+          return await adminUserDetail(request, env, cors, uuid);
+        }
+      }
+
       // --- CustomSkinLoader (скины в игре) ---
       if (pathname.startsWith("/api/csl/") && request.method === "GET") {
         const rest = pathname.slice("/api/csl/".length);
@@ -389,8 +404,133 @@ async function getUserProfile(env, cors, uuid) {
   );
 }
 
-// --- CustomSkinLoader -------------------------------------------------------
+// --- админ -----------------------------------------------------------------
 
+async function requireAdmin(request, env, cors) {
+  const user = await userFromRequest(request, env);
+  if (!user) return { error: json({ detail: "Требуется вход" }, 401, cors) };
+  if (!user.is_admin) return { error: json({ detail: "Нет доступа" }, 403, cors) };
+  return { user };
+}
+
+async function listAllKeys(env, prefix) {
+  const keys = [];
+  let cursor;
+  do {
+    const res = await env.KV.list({ prefix, cursor });
+    for (const k of res.keys) keys.push(k.name);
+    cursor = res.list_complete ? undefined : res.cursor;
+  } while (cursor);
+  return keys;
+}
+
+async function adminListUsers(request, env, cors) {
+  const a = await requireAdmin(request, env, cors);
+  if (a.error) return a.error;
+
+  const keys = await listAllKeys(env, "user:");
+  const all = [];
+  for (const key of keys) {
+    const u = await getJSON(env, key);
+    if (u) all.push(u);
+  }
+
+  const users = [];
+  for (const u of all) {
+    const groups = (await getJSON(env, "usergroups:" + u.id)) || [];
+    users.push({
+      id: u.id,
+      username: u.username,
+      email: u.email,
+      uuid: u.uuid,
+      is_admin: !!u.is_admin,
+      created_at: u.created_at,
+      last_login: u.last_login || null,
+      has_avatar: !!u.has_avatar,
+      avatar_url: avatarUrl(u),
+      has_skin: !!u.has_skin,
+      skin_url: skinUrl(u),
+      groups: groups.length,
+    });
+  }
+  users.sort((x, y) => (y.last_login || 0) - (x.last_login || 0));
+
+  const now = unix();
+  return json(
+    {
+      users,
+      stats: {
+        total: all.length,
+        admins: all.filter((u) => u.is_admin).length,
+        with_skin: all.filter((u) => u.has_skin).length,
+        with_avatar: all.filter((u) => u.has_avatar).length,
+        online_24h: all.filter((u) => u.last_login && now - u.last_login < 86400).length,
+        online_7d: all.filter((u) => u.last_login && now - u.last_login < 604800).length,
+        groups: (await listAllKeys(env, "group:")).length,
+      },
+    },
+    200,
+    cors
+  );
+}
+
+async function adminUserDetail(request, env, cors, uuid) {
+  const a = await requireAdmin(request, env, cors);
+  if (a.error) return a.error;
+
+  const uid = await env.KV.get("uuid:" + uuid);
+  const u = uid ? await getJSON(env, "user:" + uid) : null;
+  if (!u) return json({ detail: "Пользователь не найден" }, 404, cors);
+
+  const groups = [];
+  for (const gid of (await getJSON(env, "usergroups:" + u.id)) || []) {
+    const g = await getJSON(env, "group:" + gid);
+    if (g) {
+      groups.push({
+        id: g.id,
+        name: g.name,
+        owner: String(g.owner) === String(u.id),
+        member_count: g.members.length,
+        created_at: g.created_at,
+      });
+    }
+  }
+
+  return json(
+    {
+      id: u.id,
+      username: u.username,
+      email: u.email,
+      uuid: u.uuid,
+      is_admin: !!u.is_admin,
+      created_at: u.created_at,
+      last_login: u.last_login || null,
+      has_avatar: !!u.has_avatar,
+      avatar_url: avatarUrl(u),
+      has_skin: !!u.has_skin,
+      skin_url: skinUrl(u),
+      groups,
+    },
+    200,
+    cors
+  );
+}
+
+async function adminSetAdmin(request, env, cors, uuid) {
+  const a = await requireAdmin(request, env, cors);
+  if (a.error) return a.error;
+
+  const uid = await env.KV.get("uuid:" + uuid);
+  const u = uid ? await getJSON(env, "user:" + uid) : null;
+  if (!u) return json({ detail: "Пользователь не найден" }, 404, cors);
+
+  const body = await readJson(request);
+  u.is_admin = body.admin ? 1 : 0;
+  await putJSON(env, "user:" + uid, u);
+  return json({ ok: true, is_admin: !!u.is_admin }, 200, cors);
+}
+
+// --- CustomSkinLoader -------------------------------------------------------
 async function sha256hex(input) {
   const data = typeof input === "string" ? new TextEncoder().encode(input) : input;
   const buf = await crypto.subtle.digest("SHA-256", data);

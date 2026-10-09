@@ -178,6 +178,13 @@ def current_user(authorization: Optional[str]) -> dict:
     return user
 
 
+def require_admin(authorization: Optional[str]) -> dict:
+    user = current_user(authorization)
+    if not user["is_admin"]:
+        raise HTTPException(status_code=403, detail="Нет доступа")
+    return user
+
+
 # --- эндпоинты --------------------------------------------------------------
 
 @app.get("/api/health")
@@ -431,6 +438,81 @@ def remove_group(group_id: str, authorization: Optional[str] = Header(default=No
         raise HTTPException(status_code=403, detail="Удалять может только владелец")
     db.delete_group(group_id)
     return {"ok": True}
+
+
+# --- админ ------------------------------------------------------------------
+
+def _admin_user_row(u: dict) -> dict:
+    has_avatar = db.has_media(u["id"], "avatar")
+    has_skin = db.has_media(u["id"], "skin")
+    return {
+        "id": u["id"],
+        "username": u["username"],
+        "email": u["email"],
+        "uuid": u["uuid"],
+        "is_admin": bool(u["is_admin"]),
+        "created_at": u["created_at"],
+        "last_login": u["last_login"],
+        "has_avatar": has_avatar,
+        "avatar_url": f"/api/avatar/{u['uuid']}" if has_avatar else None,
+        "has_skin": has_skin,
+        "skin_url": f"/api/skin/{u['uuid']}" if has_skin else None,
+        "groups": len(db.list_groups_for_user(u["id"])),
+    }
+
+
+class AdminFlagPayload(BaseModel):
+    admin: bool = True
+
+
+@app.get("/api/admin/users")
+def admin_users(authorization: Optional[str] = Header(default=None)) -> dict:
+    require_admin(authorization)
+    now = int(time.time())
+    all_users = db.list_users()
+    users = [_admin_user_row(u) for u in all_users]
+    users.sort(key=lambda u: u.get("last_login") or 0, reverse=True)
+    stats = {
+        "total": len(all_users),
+        "admins": sum(1 for u in all_users if u["is_admin"]),
+        "with_skin": sum(1 for u in all_users if db.has_media(u["id"], "skin")),
+        "with_avatar": sum(1 for u in all_users if db.has_media(u["id"], "avatar")),
+        "online_24h": sum(1 for u in all_users if u["last_login"] and now - u["last_login"] < 86400),
+        "online_7d": sum(1 for u in all_users if u["last_login"] and now - u["last_login"] < 604800),
+        "groups": db.count_groups(),
+    }
+    return {"users": users, "stats": stats}
+
+
+@app.get("/api/admin/users/{user_uuid}")
+def admin_user_detail(user_uuid: str, authorization: Optional[str] = Header(default=None)) -> dict:
+    require_admin(authorization)
+    u = db.get_user_by_uuid(user_uuid)
+    if not u:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    row = _admin_user_row(u)
+    row["groups"] = [
+        {
+            "id": g["id"],
+            "name": g["name"],
+            "owner": g["owner_id"] == u["id"],
+            "member_count": g["member_count"],
+            "created_at": g["created_at"],
+        }
+        for g in db.list_groups_for_user(u["id"])
+    ]
+    return row
+
+
+@app.post("/api/admin/users/{user_uuid}/admin")
+def admin_set_admin(user_uuid: str, payload: AdminFlagPayload,
+                    authorization: Optional[str] = Header(default=None)) -> dict:
+    require_admin(authorization)
+    u = db.get_user_by_uuid(user_uuid)
+    if not u:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    db.set_admin(u["id"], payload.admin)
+    return {"ok": True, "is_admin": payload.admin}
 
 
 # --- статика (сайт регистрации) --------------------------------------------

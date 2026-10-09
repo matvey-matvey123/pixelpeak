@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Админ-панель — PixelPeak</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="icon" href="favicon.ico" />
+</head>
+<body>
+  <header class="nav">
+    <a class="brand" href="index.html">
+      <span class="logo">PP</span>
+      <span>PixelPeak</span>
+    </a>
+    <nav class="nav-links"></nav>
+  </header>
+
+  <main class="profile" id="adminPage">
+    <h1 class="page-title">Админ-панель</h1>
+
+    <div class="form-msg err" id="adminDenied" style="display:none">
+      Нет доступа. Эта страница доступна только администраторам.
+    </div>
+
+    <div id="adminContent">
+      <section class="profile-card">
+        <h2>Статистика</h2>
+        <div class="stats-grid" id="adminStats"></div>
+      </section>
+
+      <section class="profile-card">
+        <div class="admin-toolbar">
+          <h2>Игроки</h2>
+          <input type="search" id="adminSearch" placeholder="Поиск по нику, email или UUID" />
+        </div>
+        <div class="admin-table-wrap" id="adminTable"></div>
+        <div class="group-panel" id="adminPanel" style="display:none"></div>
+      </section>
+    </div>
+  </main>
+
+  <script src="js/config.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

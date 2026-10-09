@@ -135,6 +135,25 @@ def touch_login(user_id: int) -> None:
         )
 
 
+def list_users() -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute("SELECT * FROM users").fetchall()
+    return [dict(r) for r in rows]
+
+
+def set_admin(user_id: int, is_admin: bool) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE users SET is_admin = ? WHERE id = ?", (1 if is_admin else 0, user_id)
+        )
+
+
+def count_groups() -> int:
+    with get_conn() as conn:
+        row = conn.execute("SELECT COUNT(*) AS c FROM groups").fetchone()
+    return int(row["c"])
+
+
 # --- sessions ---------------------------------------------------------------
 
 def create_session(user_id: int, token: str, ttl_seconds: int) -> None:

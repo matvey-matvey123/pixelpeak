@@ -69,9 +69,11 @@
   function renderNav() {
     document.querySelectorAll(".nav-links").forEach((nav) => {
       if (getToken()) {
+        const u = getUser() || {};
         nav.innerHTML =
           '<a href="index.html">Главная</a>' +
           '<a href="profile.html">Аккаунт</a>' +
+          (u.is_admin ? '<a href="admin.html">Админ</a>' : "") +
           '<a href="#" data-logout>Выйти</a>';
         const lo = nav.querySelector("[data-logout]");
         if (lo) lo.addEventListener("click", (e) => {
@@ -150,6 +152,10 @@
   // ---- profile page ---------------------------------------------------------
   const profilePage = document.getElementById("profilePage");
   if (profilePage) initProfile();
+
+  // ---- admin page -----------------------------------------------------------
+  const adminPage = document.getElementById("adminPage");
+  if (adminPage) initAdmin();
 
   async function initProfile() {
     if (!getToken()) {
@@ -403,6 +409,167 @@
           await refreshGroups();
         } catch (err) {
           setMsg(document.getElementById("groupPanelMsg"), err.message, "err");
+        }
+      });
+    } catch (err) {
+      panel.innerHTML = '<p class="form-msg err">' + esc(err.message) + "</p>";
+    }
+  }
+
+  // ---- admin page -----------------------------------------------------------
+  let adminUsers = [];
+
+  async function initAdmin() {
+    if (!getToken()) { window.location.href = "login.html"; return; }
+    const token = getToken();
+    let me;
+    try {
+      me = await api("/api/me", { token });
+    } catch (err) {
+      clearAuth();
+      window.location.href = "login.html";
+      return;
+    }
+    setAuth(token, me);
+    renderNav();
+
+    if (!me.is_admin) {
+      const denied = document.getElementById("adminDenied");
+      if (denied) denied.style.display = "";
+      const content = document.getElementById("adminContent");
+      if (content) content.style.display = "none";
+      return;
+    }
+
+    const search = document.getElementById("adminSearch");
+    if (search) search.addEventListener("input", () => {
+      const q = search.value.trim().toLowerCase();
+      const filtered = !q ? adminUsers : adminUsers.filter((u) =>
+        u.username.toLowerCase().includes(q) ||
+        (u.email || "").toLowerCase().includes(q) ||
+        u.uuid.toLowerCase().includes(q));
+      renderUsers(filtered);
+    });
+
+    await loadAdmin();
+  }
+
+  async function loadAdmin() {
+    const token = getToken();
+    const statsBox = document.getElementById("adminStats");
+    if (statsBox) statsBox.innerHTML = '<p class="muted">Загрузка...</p>';
+    try {
+      const data = await api("/api/admin/users", { token });
+      adminUsers = data.users || [];
+      renderStats(data.stats || {});
+      renderUsers(adminUsers);
+    } catch (err) {
+      if (statsBox) statsBox.innerHTML = '<p class="form-msg err">' + esc(err.message) + "</p>";
+    }
+  }
+
+  function renderStats(s) {
+    const box = document.getElementById("adminStats");
+    if (!box) return;
+    const items = [
+      ["Всего игроков", s.total],
+      ["Онлайн 24ч", s.online_24h],
+      ["Онлайн 7д", s.online_7d],
+      ["Админов", s.admins],
+      ["Со скином", s.with_skin],
+      ["С аватаркой", s.with_avatar],
+      ["Групп", s.groups],
+    ];
+    box.innerHTML = items.map((it) =>
+      '<div class="stat-card"><div class="stat-val">' + (it[1] || 0) +
+      '</div><div class="stat-label">' + esc(it[0]) + "</div></div>"
+    ).join("");
+  }
+
+  function fmtDate(ts) {
+    if (!ts) return "—";
+    return new Date(ts * 1000).toLocaleString("ru-RU", {
+      day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit",
+    });
+  }
+
+  function renderUsers(users) {
+    const box = document.getElementById("adminTable");
+    if (!box) return;
+    if (!users.length) { box.innerHTML = '<p class="muted">Нет игроков</p>'; return; }
+    let html = '<table class="admin-table"><thead><tr>' +
+      "<th></th><th>Ник</th><th>Email</th><th>UUID</th><th>Групп</th>" +
+      "<th>Регистрация</th><th>Последний вход</th><th>Скин</th><th>Роль</th>" +
+      "</tr></thead><tbody>";
+    users.forEach((u) => {
+      const av = u.has_avatar
+        ? '<img class="mini-av" src="' + assetUrl(u.uuid, "avatar") + '" alt="">'
+        : '<span class="mini-av ph">' + esc((u.username || "?").charAt(0).toUpperCase()) + "</span>";
+      html += '<tr data-uuid="' + esc(u.uuid) + '" class="admin-row">' +
+        "<td>" + av + "</td>" +
+        "<td><b>" + esc(u.username) + "</b></td>" +
+        '<td class="muted small">' + esc(u.email) + "</td>" +
+        '<td class="muted small mono">' + esc(u.uuid) + "</td>" +
+        "<td>" + u.groups + "</td>" +
+        '<td class="muted small">' + fmtDate(u.created_at) + "</td>" +
+        '<td class="muted small">' + fmtDate(u.last_login) + "</td>" +
+        "<td>" + (u.has_skin ? '<span class="tag ok">есть</span>' : '<span class="muted small">—</span>') + "</td>" +
+        "<td>" + (u.is_admin ? '<span class="tag">админ</span>' : '<span class="muted small">игрок</span>') + "</td>" +
+        "</tr>";
+    });
+    html += "</tbody></table>";
+    box.innerHTML = html;
+    box.querySelectorAll(".admin-row").forEach((row) => {
+      row.addEventListener("click", () => openUser(row.getAttribute("data-uuid")));
+    });
+  }
+
+  async function openUser(uuid) {
+    const token = getToken();
+    const panel = document.getElementById("adminPanel");
+    if (!panel) return;
+    panel.style.display = "";
+    panel.innerHTML = '<p class="muted">Загрузка...</p>';
+    try {
+      const u = await api("/api/admin/users/" + uuid, { token });
+      const skin = u.has_skin
+        ? '<img class="skin-thumb" src="' + assetUrl(u.uuid, "skin", Date.now()) + '" alt="">'
+        : '<span class="muted">нет</span>';
+      let html = '<div class="group-head"><h3>' + esc(u.username) +
+        '</h3><button class="btn btn-ghost" id="closeUser">Закрыть</button></div>';
+      html += '<div class="admin-detail">' +
+        '<div><span class="muted">Email:</span> ' + esc(u.email) + "</div>" +
+        '<div><span class="muted">UUID:</span> <span class="mono">' + esc(u.uuid) + "</span></div>" +
+        '<div><span class="muted">Регистрация:</span> ' + fmtDate(u.created_at) + "</div>" +
+        '<div><span class="muted">Последний вход:</span> ' + fmtDate(u.last_login) + "</div>" +
+        '<div><span class="muted">Скин:</span> ' + skin + "</div>" +
+        "</div>";
+      html += "<h4>Группы</h4>";
+      if (!u.groups || !u.groups.length) html += '<p class="muted">Нет групп</p>';
+      else html += '<div class="member-list">' + u.groups.map((g) =>
+        '<div class="member"><span>' + esc(g.name) + "</span>" +
+        (g.owner ? '<span class="tag">владелец</span>' : "") +
+        '<span class="muted small">' + g.member_count + " чел.</span></div>"
+      ).join("") + "</div>";
+      html += '<div class="group-actions"><button class="btn ' +
+        (u.is_admin ? "btn-ghost danger" : "btn-primary") + '" id="toggleAdmin">' +
+        (u.is_admin ? "Снять админа" : "Сделать админом") + "</button></div>";
+      html += '<div class="form-msg" id="adminPanelMsg"></div>';
+      panel.innerHTML = html;
+
+      document.getElementById("closeUser").addEventListener("click", () => { panel.style.display = "none"; });
+      document.getElementById("toggleAdmin").addEventListener("click", async () => {
+        const msg = document.getElementById("adminPanelMsg");
+        try {
+          setMsg(msg, "Сохраняем...", "");
+          await api("/api/admin/users/" + uuid + "/admin", {
+            method: "POST", token, body: { admin: !u.is_admin },
+          });
+          setMsg(msg, "Готово", "ok");
+          await loadAdmin();
+          panel.style.display = "none";
+        } catch (err) {
+          setMsg(msg, err.message, "err");
         }
       });
     } catch (err) {
