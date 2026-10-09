@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Данные/секреты
+*.db
+*.sqlite3
+server/pixelpeak.db
+launcher/assets/icon_source.png
+
+# Сборка
+build/
+dist/
+*.spec
+launcher/build/
+launcher/dist/
+
+# Прочее
+.env
+.DS_Store
+Thumbs.db
+.pytest_cache/

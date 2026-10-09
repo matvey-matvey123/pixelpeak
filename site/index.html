@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PixelPeak — лаунчер Minecraft</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="icon" href="favicon.ico" />
+</head>
+<body>
+  <header class="nav">
+    <a class="brand" href="index.html">
+      <span class="logo">PP</span>
+      <span>PixelPeak</span>
+    </a>
+    <nav class="nav-links">
+      <a href="index.html">Главная</a>
+      <a href="login.html">Войти</a>
+      <a class="btn btn-primary" href="register.html">Создать аккаунт</a>
+    </nav>
+  </header>
+
+  <main class="hero">
+    <div class="hero-text">
+      <h1>Играй в Minecraft<br /><span class="grad">без лишних кнопок</span></h1>
+      <p>
+        PixelPeak — это лаунчер с выбором ника, любой версии игры,
+        поддержкой Fabric и Forge, авто-скачиванием Java и своих аккаунтов.
+      </p>
+      <div class="hero-actions">
+        <a class="btn btn-primary big" href="register.html">Создать аккаунт</a>
+        <a class="btn btn-ghost big" href="login.html">У меня уже есть аккаунт</a>
+      </div>
+      <div class="download-note">
+        Скачать лаунчер: <a id="downloadLink" href="#">PixelPeak-Setup.exe</a>
+      </div>
+    </div>
+    <div class="hero-card">
+      <div class="card-line"><span class="dot"></span> Версии: vanilla, Fabric, Forge</div>
+      <div class="card-line"><span class="dot"></span> Свой ник и скины</div>
+      <div class="card-line"><span class="dot"></span> Настройка RAM и Java</div>
+      <div class="card-line"><span class="dot"></span> Встроенная консоль игры</div>
+    </div>
+  </main>
+
+  <section class="features">
+    <div class="feature"><h3>Аккаунт PixelPeak</h3><p>Одна учётка для сайта и лаунчера. Регистрация за 10 секунд.</p></div>
+    <div class="feature"><h3>Любая версия</h3><p>От старых беты-релизов до последних снапшотов и мод-лоадеров.</p></div>
+    <div class="feature"><h3>Всё под рукой</h3><p>Ник, версия, память, папка игры и Java — в одном окне.</p></div>
+  </section>
+
+  <footer class="footer">
+    <span>© <span id="year"></span> PixelPeak</span>
+    <span class="muted">Не связан с Mojang AB.</span>
+  </footer>
+
+  <script src="js/config.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

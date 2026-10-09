@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Вход — PixelPeak</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="icon" href="favicon.ico" />
+</head>
+<body class="auth-page">
+  <a class="brand center" href="index.html"><span class="logo">PP</span><span>PixelPeak</span></a>
+  <form class="auth-card" id="loginForm">
+    <h2>Вход в аккаунт</h2>
+    <p class="muted">Введи ник или email и пароль.</p>
+    <label>Ник или Email<input type="text" name="username" autocomplete="username" required /></label>
+    <label>Пароль<input type="password" name="password" autocomplete="current-password" required /></label>
+    <div class="form-msg" id="msg"></div>
+    <button class="btn btn-primary big" type="submit">Войти</button>
+    <p class="muted center-text">Нет аккаунта? <a href="register.html">Создать</a></p>
+  </form>
+
+  <script src="js/config.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
