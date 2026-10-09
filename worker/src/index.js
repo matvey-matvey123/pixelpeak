@@ -37,6 +37,40 @@ export default {
       if (pathname === "/api/logout" && request.method === "POST") {
         return await logout(request, env, cors);
       }
+
+      // --- профиль: аватар и скин ---
+      if (pathname === "/api/profile/avatar" && request.method === "POST") {
+        return await uploadImage(request, env, cors, "avatar", false);
+      }
+      if (pathname === "/api/profile/skin" && request.method === "POST") {
+        return await uploadImage(request, env, cors, "skin", true);
+      }
+      if (pathname.startsWith("/api/avatar/") && request.method === "GET") {
+        return await serveImage(env, cors, "avatar", pathname.slice("/api/avatar/".length));
+      }
+      if (pathname.startsWith("/api/skin/") && request.method === "GET") {
+        return await serveImage(env, cors, "skin", pathname.slice("/api/skin/".length));
+      }
+      if (pathname.startsWith("/api/user/") && request.method === "GET") {
+        return await getUserProfile(env, cors, pathname.slice("/api/user/".length));
+      }
+
+      // --- группы ---
+      if (pathname === "/api/groups" && request.method === "GET") {
+        return await listGroups(request, env, cors);
+      }
+      if (pathname === "/api/groups" && request.method === "POST") {
+        return await createGroup(request, env, cors);
+      }
+      if (pathname.startsWith("/api/groups/")) {
+        const rest = pathname.slice("/api/groups/".length);
+        const [gid, action] = rest.split("/");
+        if (!action && request.method === "GET") return await getGroup(request, env, cors, gid);
+        if (action === "members" && request.method === "POST") return await addMember(request, env, cors, gid);
+        if (action === "leave" && request.method === "POST") return await leaveGroup(request, env, cors, gid);
+        if (action === "delete" && request.method === "POST") return await deleteGroup(request, env, cors, gid);
+      }
+
       return json({ detail: "Not found" }, 404, cors);
     } catch (err) {
       return json({ detail: String((err && err.message) || err) }, 500, cors);
@@ -82,7 +116,17 @@ function publicUser(u) {
     uuid: u.uuid,
     is_admin: !!u.is_admin,
     created_at: u.created_at,
+    has_avatar: !!u.has_avatar,
+    has_skin: !!u.has_skin,
   };
+}
+
+function avatarUrl(u) {
+  return u && u.has_avatar ? `/api/avatar/${u.uuid}` : null;
+}
+
+function skinUrl(u) {
+  return u && u.has_skin ? `/api/skin/${u.uuid}` : null;
 }
 
 function randomToken() {
@@ -184,6 +228,7 @@ async function register(request, env, cors) {
   await putJSON(env, "user:" + id, user);
   await env.KV.put("name:" + uname, String(id));
   await env.KV.put("email:" + email, String(id));
+  await env.KV.put("uuid:" + user.uuid, String(id));
 
   const token = await createSession(env, id);
   return json({ token, user: publicUser(user) }, 201, cors);
@@ -250,6 +295,240 @@ async function userExists(url, env, cors) {
   if (!username) return json({ exists: false, username: "" }, 200, cors);
   const id = await env.KV.get("name:" + username);
   return json({ exists: !!id, username }, 200, cors);
+}
+
+// --- профиль: аватар и скин ------------------------------------------------
+
+function pngSize(b) {
+  if (b.length < 24) return null;
+  const sig = [137, 80, 78, 71, 13, 10, 26, 10];
+  for (let i = 0; i < 8; i++) if (b[i] !== sig[i]) return null;
+  const w = ((b[16] << 24) | (b[17] << 16) | (b[18] << 8) | b[19]) >>> 0;
+  const h = ((b[20] << 24) | (b[21] << 16) | (b[22] << 8) | b[23]) >>> 0;
+  return { w, h };
+}
+
+async function uploadImage(request, env, cors, kind, isSkin) {
+  const user = await userFromRequest(request, env);
+  if (!user) return json({ detail: "Требуется вход" }, 401, cors);
+
+  const body = await readJson(request);
+  const dataUrl = String(body.image || "");
+  const m = /^data:image\/(png|jpeg|jpg|webp);base64,([A-Za-z0-9+/=]+)$/i.exec(dataUrl);
+  if (!m) return json({ detail: "Неверный формат изображения" }, 422, cors);
+
+  let mime = "image/" + m[1].toLowerCase();
+  if (mime === "image/jpg") mime = "image/jpeg";
+
+  let bytes;
+  try {
+    const bin = atob(m[2]);
+    bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  } catch {
+    return json({ detail: "Не удалось прочитать изображение" }, 422, cors);
+  }
+
+  const max = isSkin ? 64 * 1024 : 512 * 1024;
+  if (bytes.length > max) return json({ detail: "Файл слишком большой" }, 413, cors);
+
+  if (isSkin) {
+    const dim = pngSize(bytes);
+    if (!dim) return json({ detail: "Скин должен быть PNG" }, 422, cors);
+    if (!(dim.w === 64 && (dim.h === 64 || dim.h === 32))) {
+      return json({ detail: "Скин должен быть 64×64 или 64×32" }, 422, cors);
+    }
+  }
+
+  await putJSON(env, kind + ":" + user.id, { data: m[2], type: mime, updated: unix() });
+  user["has_" + kind] = 1;
+  await putJSON(env, "user:" + user.id, user);
+  await env.KV.put("uuid:" + user.uuid, String(user.id));
+  return json({ ok: true, url: `/${kind === "skin" ? "api/skin" : "api/avatar"}/${user.uuid}` }, 200, cors);
+}
+
+async function serveImage(env, cors, kind, uuid) {
+  const uid = await env.KV.get("uuid:" + uuid);
+  if (!uid) return new Response("Not found", { status: 404, headers: cors });
+  const rec = await getJSON(env, kind + ":" + uid);
+  if (!rec || !rec.data) return new Response("Not found", { status: 404, headers: cors });
+  return new Response(b64decode(rec.data), {
+    status: 200,
+    headers: { "Content-Type": rec.type || "image/png", "Cache-Control": "public, max-age=120", ...cors },
+  });
+}
+
+async function getUserProfile(env, cors, uuid) {
+  const uid = await env.KV.get("uuid:" + uuid);
+  if (!uid) return json({ detail: "Пользователь не найден" }, 404, cors);
+  const u = await getJSON(env, "user:" + uid);
+  if (!u) return json({ detail: "Пользователь не найден" }, 404, cors);
+  return json(
+    {
+      username: u.username,
+      uuid: u.uuid,
+      created_at: u.created_at,
+      has_avatar: !!u.has_avatar,
+      avatar_url: avatarUrl(u),
+      has_skin: !!u.has_skin,
+      skin_url: skinUrl(u),
+    },
+    200,
+    cors
+  );
+}
+
+// --- группы ----------------------------------------------------------------
+
+function randomId(nbytes = 8) {
+  const a = crypto.getRandomValues(new Uint8Array(nbytes));
+  return [...a].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function listGroups(request, env, cors) {
+  const user = await userFromRequest(request, env);
+  if (!user) return json({ detail: "Требуется вход" }, 401, cors);
+  const ids = (await getJSON(env, "usergroups:" + user.id)) || [];
+  const groups = [];
+  for (const gid of ids) {
+    const g = await getJSON(env, "group:" + gid);
+    if (g) {
+      groups.push({
+        id: g.id,
+        name: g.name,
+        owner: String(g.owner) === String(user.id),
+        member_count: g.members.length,
+        created_at: g.created_at,
+      });
+    }
+  }
+  return json({ groups }, 200, cors);
+}
+
+async function createGroup(request, env, cors) {
+  const user = await userFromRequest(request, env);
+  if (!user) return json({ detail: "Требуется вход" }, 401, cors);
+  const body = await readJson(request);
+  const name = String(body.name || "").trim().slice(0, 40) || "Моя группа";
+  const requested = Array.isArray(body.members) ? body.members.slice(0, 20) : [];
+
+  const memberIds = [String(user.id)];
+  const notFound = [];
+  for (const uname of requested) {
+    const clean = String(uname || "").trim().toLowerCase();
+    if (!clean) continue;
+    const uid = await env.KV.get("name:" + clean);
+    if (uid && !memberIds.includes(String(uid))) memberIds.push(String(uid));
+    else if (!uid) notFound.push(String(uname).trim());
+  }
+
+  const id = randomId(8);
+  const g = { id, name, owner: String(user.id), members: memberIds, created_at: unix() };
+  await putJSON(env, "group:" + id, g);
+  for (const uid of memberIds) {
+    const list = (await getJSON(env, "usergroups:" + uid)) || [];
+    if (!list.includes(id)) {
+      list.push(id);
+      await putJSON(env, "usergroups:" + uid, list);
+    }
+  }
+  return json(
+    { group: { id, name, member_count: memberIds.length, owner: true }, not_found: notFound },
+    201,
+    cors
+  );
+}
+
+async function getGroup(request, env, cors, gid) {
+  const user = await userFromRequest(request, env);
+  if (!user) return json({ detail: "Требуется вход" }, 401, cors);
+  const g = await getJSON(env, "group:" + gid);
+  if (!g) return json({ detail: "Группа не найдена" }, 404, cors);
+  if (!g.members.map(String).includes(String(user.id))) return json({ detail: "Нет доступа" }, 403, cors);
+
+  const members = [];
+  for (const uid of g.members) {
+    const u = await getJSON(env, "user:" + uid);
+    if (u) {
+      members.push({
+        username: u.username,
+        uuid: u.uuid,
+        owner: String(uid) === String(g.owner),
+        has_avatar: !!u.has_avatar,
+        avatar_url: avatarUrl(u),
+        has_skin: !!u.has_skin,
+        skin_url: skinUrl(u),
+      });
+    }
+  }
+  return json(
+    { id: g.id, name: g.name, owner: String(g.owner) === String(user.id), created_at: g.created_at, members },
+    200,
+    cors
+  );
+}
+
+async function addMember(request, env, cors, gid) {
+  const user = await userFromRequest(request, env);
+  if (!user) return json({ detail: "Требуется вход" }, 401, cors);
+  const g = await getJSON(env, "group:" + gid);
+  if (!g) return json({ detail: "Группа не найдена" }, 404, cors);
+  if (!g.members.map(String).includes(String(user.id))) return json({ detail: "Нет доступа" }, 403, cors);
+
+  const body = await readJson(request);
+  const clean = String(body.username || "").trim().toLowerCase();
+  if (!USERNAME_RE.test(clean)) return json({ detail: "Некорректный ник" }, 422, cors);
+  const uid = await env.KV.get("name:" + clean);
+  if (!uid) return json({ detail: `Игрок «${body.username}» не найден` }, 404, cors);
+
+  if (!g.members.map(String).includes(String(uid))) {
+    g.members.push(String(uid));
+    await putJSON(env, "group:" + gid, g);
+    const list = (await getJSON(env, "usergroups:" + uid)) || [];
+    if (!list.includes(gid)) {
+      list.push(gid);
+      await putJSON(env, "usergroups:" + uid, list);
+    }
+  }
+  return json({ ok: true, member_count: g.members.length }, 200, cors);
+}
+
+async function leaveGroup(request, env, cors, gid) {
+  const user = await userFromRequest(request, env);
+  if (!user) return json({ detail: "Требуется вход" }, 401, cors);
+  const g = await getJSON(env, "group:" + gid);
+  if (!g) return json({ detail: "Группа не найдена" }, 404, cors);
+
+  const uid = String(user.id);
+  g.members = g.members.filter((m) => String(m) !== uid);
+  if (String(g.owner) === uid) {
+    if (g.members.length) {
+      g.owner = g.members[0];
+      await putJSON(env, "group:" + gid, g);
+    } else {
+      await env.KV.delete("group:" + gid);
+    }
+  } else {
+    await putJSON(env, "group:" + gid, g);
+  }
+  const list = (await getJSON(env, "usergroups:" + uid)) || [];
+  await putJSON(env, "usergroups:" + uid, list.filter((x) => x !== gid));
+  return json({ ok: true }, 200, cors);
+}
+
+async function deleteGroup(request, env, cors, gid) {
+  const user = await userFromRequest(request, env);
+  if (!user) return json({ detail: "Требуется вход" }, 401, cors);
+  const g = await getJSON(env, "group:" + gid);
+  if (!g) return json({ detail: "Группа не найдена" }, 404, cors);
+  if (String(g.owner) !== String(user.id)) return json({ detail: "Удалять может только владелец" }, 403, cors);
+
+  for (const uid of g.members) {
+    const list = (await getJSON(env, "usergroups:" + uid)) || [];
+    await putJSON(env, "usergroups:" + uid, list.filter((x) => x !== gid));
+  }
+  await env.KV.delete("group:" + gid);
+  return json({ ok: true }, 200, cors);
 }
 
 // --- offline UUID (md5, как в Java offline-mode) ----------------------------

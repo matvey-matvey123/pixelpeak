@@ -53,6 +53,37 @@ def init_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS media (
+                user_id INTEGER NOT NULL,
+                kind    TEXT NOT NULL,
+                data    TEXT NOT NULL,
+                type    TEXT NOT NULL,
+                updated INTEGER NOT NULL,
+                PRIMARY KEY (user_id, kind)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS groups (
+                id         TEXT PRIMARY KEY,
+                name       TEXT NOT NULL,
+                owner_id   INTEGER NOT NULL,
+                created_at INTEGER NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS group_members (
+                group_id TEXT NOT NULL,
+                user_id  INTEGER NOT NULL,
+                PRIMARY KEY (group_id, user_id)
+            )
+            """
+        )
 
 
 def offline_uuid(name: str) -> str:
@@ -127,3 +158,111 @@ def get_session(token: str) -> Optional[dict]:
 def delete_session(token: str) -> None:
     with get_conn() as conn:
         conn.execute("DELETE FROM sessions WHERE token = ?", (token,))
+
+
+# --- media (аватар/скин) ----------------------------------------------------
+
+def get_user_by_uuid(user_uuid: str) -> Optional[dict]:
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM users WHERE uuid = ?", (user_uuid,)).fetchone()
+    return dict(row) if row else None
+
+
+def set_media(user_id: int, kind: str, data: str, media_type: str) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO media (user_id, kind, data, type, updated) VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT(user_id, kind) DO UPDATE SET data=excluded.data, "
+            "type=excluded.type, updated=excluded.updated",
+            (user_id, kind, data, media_type, int(time.time())),
+        )
+
+
+def get_media(user_id: int, kind: str) -> Optional[dict]:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM media WHERE user_id = ? AND kind = ?", (user_id, kind)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def has_media(user_id: int, kind: str) -> bool:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM media WHERE user_id = ? AND kind = ?", (user_id, kind)
+        ).fetchone()
+    return row is not None
+
+
+# --- группы -----------------------------------------------------------------
+
+def create_group(name: str, owner_id: int, member_ids: list[int]) -> dict:
+    gid = uuid.uuid4().hex[:16]
+    now = int(time.time())
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO groups (id, name, owner_id, created_at) VALUES (?, ?, ?, ?)",
+            (gid, name, owner_id, now),
+        )
+        for uid in member_ids:
+            conn.execute(
+                "INSERT OR IGNORE INTO group_members (group_id, user_id) VALUES (?, ?)",
+                (gid, uid),
+            )
+    return get_group(gid)
+
+
+def get_group(group_id: str) -> Optional[dict]:
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM groups WHERE id = ?", (group_id,)).fetchone()
+        if not row:
+            return None
+        members = [
+            r["user_id"]
+            for r in conn.execute(
+                "SELECT user_id FROM group_members WHERE group_id = ?", (group_id,)
+            ).fetchall()
+        ]
+    group = dict(row)
+    group["members"] = members
+    return group
+
+
+def list_groups_for_user(user_id: int) -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT g.*, (SELECT COUNT(*) FROM group_members m WHERE m.group_id = g.id) AS member_count "
+            "FROM groups g JOIN group_members gm ON gm.group_id = g.id "
+            "WHERE gm.user_id = ? ORDER BY g.created_at DESC",
+            (user_id,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def add_group_member(group_id: str, user_id: int) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO group_members (group_id, user_id) VALUES (?, ?)",
+            (group_id, user_id),
+        )
+
+
+def remove_group_member(group_id: str, user_id: int) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            "DELETE FROM group_members WHERE group_id = ? AND user_id = ?",
+            (group_id, user_id),
+        )
+
+
+def set_group_owner(group_id: str, user_id: int) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE groups SET owner_id = ? WHERE id = ?", (user_id, group_id)
+        )
+
+
+def delete_group(group_id: str) -> None:
+    with get_conn() as conn:
+        conn.execute("DELETE FROM group_members WHERE group_id = ?", (group_id,))
+        conn.execute("DELETE FROM groups WHERE id = ?", (group_id,))

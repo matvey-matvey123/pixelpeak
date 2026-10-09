@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Аккаунт — PixelPeak</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="icon" href="favicon.ico" />
+</head>
+<body>
+  <header class="nav">
+    <a class="brand" href="index.html">
+      <span class="logo">PP</span>
+      <span>PixelPeak</span>
+    </a>
+    <nav class="nav-links"></nav>
+  </header>
+
+  <main class="profile" id="profilePage">
+    <section class="profile-card">
+      <div class="account">
+        <div class="avatar-wrap">
+          <span class="avatar-ph" id="accAvatarPh">?</span>
+          <img class="avatar" id="accAvatar" alt="Аватар" />
+        </div>
+        <div>
+          <h2 id="accName">...</h2>
+          <div class="muted" id="accEmail"></div>
+          <button class="btn btn-ghost small" type="button" id="avatarBtn">Сменить аватарку</button>
+          <input type="file" id="avatarInput" accept="image/*" hidden />
+          <div class="form-msg" id="avatarMsg"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="profile-card">
+      <h2>Скин</h2>
+      <p class="muted">Загрузи PNG-файл скина 64×64 или 64×32.</p>
+      <div class="skin-preview">
+        <div class="skin-figures">
+          <canvas id="skinCanvas" width="128" height="128"></canvas>
+          <canvas id="skinHead" width="64" height="64"></canvas>
+          <div class="skin-empty" id="skinEmpty">Скин не загружен</div>
+        </div>
+        <div>
+          <button class="btn btn-primary" type="button" id="skinBtn">Загрузить скин</button>
+          <input type="file" id="skinInput" accept="image/png,image/*" hidden />
+          <div class="form-msg" id="skinMsg"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="profile-card">
+      <h2>Группы</h2>
+      <p class="muted">Создай группу и позови друзей по нику.</p>
+      <form class="group-form" id="groupForm">
+        <label>Название группы<input type="text" name="name" maxlength="40" placeholder="Например: Друзья" /></label>
+        <label>Участники (ни ки через запятую)<input type="text" name="members" placeholder="Steve, Alex" /></label>
+        <div class="form-msg" id="groupMsg"></div>
+        <button class="btn btn-primary" type="submit">Создать группу</button>
+      </form>
+      <div class="group-list" id="groupList"></div>
+      <div class="group-panel" id="groupPanel" style="display:none"></div>
+    </section>
+
+    <p class="muted center-text"><a href="#" id="logoutBtn">Выйти из аккаунта</a></p>
+  </main>
+
+  <script src="js/config.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
