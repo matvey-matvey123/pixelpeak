@@ -1,0 +1,8 @@
+# Конфиг для развёртывания САЙТА через Cloudflare (Git-интеграция Workers/Pages).
+# Backend API живёт в worker/wrangler.toml и деплоится отдельно (GitHub Actions).
+name = "pixelpeak-site"
+compatibility_date = "2025-01-01"
+workers_dev = true
+
+[assets]
+directory = "site/pp-x7k2q9"
