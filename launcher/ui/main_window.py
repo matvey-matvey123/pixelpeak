@@ -692,6 +692,8 @@ class MainWindow(QWidget):
                     )
                     if name:
                         self._log_play(f"> Скин-загрузчик готов: {name}")
+                    else:
+                        self._log_play("> Скин-загрузчик недоступен для этой версии — пропускаем")
                 except Exception as e:
                     self._log_play(f"[!] Скин-загрузчик: {e}")
         self.status.setText("Запуск Minecraft...")

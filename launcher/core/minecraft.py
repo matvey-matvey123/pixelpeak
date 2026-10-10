@@ -207,41 +207,50 @@ class Minecraft:
             return None
 
         headers = {"User-Agent": "PixelPeak/1.0.0 (github.com/matvey-matvey123/pixelpeak)"}
-        files: list[dict] = []
-        attempts = [
-            {"loaders": json.dumps([loader]), "game_versions": json.dumps([mc_version])},
-            {"loaders": json.dumps([loader])},
-        ]
-        for params in attempts:
-            try:
-                r = requests.get(
-                    "https://api.modrinth.com/v2/project/customskinloader/version",
-                    params=params,
-                    headers=headers,
-                    timeout=20,
-                )
-                if r.ok:
-                    versions = r.json()
-                    if versions:
-                        files = versions[0].get("files") or []
-                        break
-            except Exception:
-                continue
-        if not files:
-            raise MinecraftError("CustomSkinLoader не найден для этой версии/загрузчика")
-
-        primary = next((f for f in files if f.get("primary")), files[0])
-        url, fname = primary.get("url"), primary.get("filename") or "CustomSkinLoader.jar"
-        if not url:
-            raise MinecraftError("Не удалось получить ссылку на CustomSkinLoader")
-
         mods = Path(self.game_dir) / "mods"
-        mods.mkdir(parents=True, exist_ok=True)
+
+        def _remove_existing() -> None:
+            if mods.is_dir():
+                for f in mods.glob("CustomSkinLoader*.jar"):
+                    try:
+                        f.unlink()
+                    except OSError:
+                        pass
+
+        # Ищем версию ТОЛЬКО с точным совпадением game_version. На неподдерживаемых
+        # версиях CustomSkinLoader крашит игру при загрузке, поэтому лучше пропустить.
+        try:
+            r = requests.get(
+                "https://api.modrinth.com/v2/project/customskinloader/version",
+                params={
+                    "loaders": json.dumps([loader]),
+                    "game_versions": json.dumps([mc_version]),
+                },
+                headers=headers,
+                timeout=20,
+            )
+            versions = r.json() if r.ok else []
+        except Exception:
+            versions = []
+
+        if not versions:
+            _remove_existing()
+            return None
+
+        files = versions[0].get("files") or []
+        primary = next((f for f in files if f.get("primary")), files[0] if files else None)
+        if not primary or not primary.get("url"):
+            raise MinecraftError("Не удалось получить ссылку на CustomSkinLoader")
+        url, fname = primary["url"], primary.get("filename") or "CustomSkinLoader.jar"
+
         try:
             content = requests.get(url, headers=headers, timeout=90).content
-            (mods / fname).write_bytes(content)
         except Exception as e:
             raise MinecraftError(f"Не удалось скачать скин-загрузчик: {e}")
+
+        mods.mkdir(parents=True, exist_ok=True)
+        _remove_existing()
+        (mods / fname).write_bytes(content)
 
         root = (CONFIG.get("api_base") or "").rstrip("/") + "/api/csl/"
         el = Path(self.game_dir) / "CustomSkinLoader" / "ExtraList"
