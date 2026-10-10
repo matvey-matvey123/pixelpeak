@@ -76,6 +76,8 @@
 
   // ---- nav ------------------------------------------------------------------
   function renderNav() {
+    const tg = (window.PIXELPEAK && window.PIXELPEAK.TELEGRAM_URL) || "";
+    const tgLink = tg ? '<a href="' + tg + '" target="_blank" rel="noopener">Telegram</a>' : "";
     document.querySelectorAll(".nav-links").forEach((nav) => {
       if (getToken()) {
         const u = getUser() || {};
@@ -83,6 +85,7 @@
           '<a href="index.html">Главная</a>' +
           '<a href="profile.html">Аккаунт</a>' +
           (u.is_admin ? '<a href="admin.html">Админ</a>' : "") +
+          tgLink +
           '<a href="#" data-logout>Выйти</a>';
         const lo = nav.querySelector("[data-logout]");
         if (lo) lo.addEventListener("click", (e) => {
@@ -93,6 +96,7 @@
       } else {
         nav.innerHTML =
           '<a href="index.html">Главная</a>' +
+          tgLink +
           '<a href="login.html">Войти</a>' +
           '<a class="btn btn-primary" href="register.html">Создать аккаунт</a>';
       }

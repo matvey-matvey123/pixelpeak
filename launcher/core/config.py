@@ -23,6 +23,7 @@ DEFAULTS: dict[str, Any] = {
     "api_base": os.environ.get(
         "PIXELPEAK_API", "https://pixelpeak-api.matveygorvat.workers.dev"
     ),
+    "telegram_url": "https://t.me/PixelPeak_original",
     "username": "",
     "token": "",
     "uuid": "",

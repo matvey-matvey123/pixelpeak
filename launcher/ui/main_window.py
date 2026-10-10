@@ -119,6 +119,16 @@ class MainWindow(QWidget):
 
         lay.addStretch(1)
 
+        tg_url = CONFIG.get("telegram_url")
+        if tg_url:
+            tg = QPushButton("Telegram-канал")
+            tg.setObjectName("Nav")
+            tg.setCursor(Qt.PointingHandCursor)
+            tg.clicked.connect(
+                lambda: QDesktopServices.openUrl(QUrl(tg_url))
+            )
+            lay.addWidget(tg)
+
         logout = QPushButton("Выйти")
         logout.setObjectName("Nav")
         logout.setCursor(Qt.PointingHandCursor)
